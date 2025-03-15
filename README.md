@@ -1,4 +1,8 @@
+DEMO: https://spreadsheetllmencoder.streamlit.app/
+
 # Spreadsheet LLM Encoder
+
+streamlit
 
 This repository contains an implementation of the SpreadsheetLLM encoding method introduced by Microsoft Research in July 2024. The encoder transforms Excel spreadsheets into a specialized JSON format that preserves both content and structural relationships, making them suitable for processing by Large Language Models (LLMs).
 
