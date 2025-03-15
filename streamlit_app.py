@@ -11,7 +11,7 @@ def get_download_link(json_data, filename="spreadsheet_data.json"):
     return href
 
 def main():
-    st.title("Spreadsheet to JSON Converter")
+    st.title("Spreadsheet to Encoded JSON")
     st.write("Upload your spreadsheet file (Excel or CSV) and get JSON in return.")
 
     # File uploader
