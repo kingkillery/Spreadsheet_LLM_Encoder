@@ -2,6 +2,7 @@ import os
 import pandas as pd  # Used for some data manipulation
 import openpyxl
 import json
+from temp_helpers import infer_cell_data_type, categorize_number_format
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string
@@ -161,8 +162,15 @@ def get_cell_format_key(cell):
         else:
             format_info["fill"] = {"color": None}
 
-        # 5. Number Format
-        format_info["number_format"] = cell.number_format
+        # 5. Number Format (Original, Inferred Type, Category)
+        original_number_format = cell.number_format
+        inferred_type = infer_cell_data_type(cell) # Call new helper
+        category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+
+        format_info["original_number_format"] = original_number_format
+        format_info["inferred_data_type"] = inferred_type
+        format_info["number_format_category"] = category
+        # format_info["number_format"] = cell.number_format # Keep original for now, or decide if it's redundant
     except Exception as e:
         # If there's an error extracting format, use a simplified format key
         format_info = {"error": str(e)}
@@ -261,8 +269,15 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                 else:
                     format_info["fill"] = {"color": None}
 
-                # 5. Number Format
-                format_info["number_format"] = cell.number_format
+                # 5. Number Format (Original, Inferred Type, Category)
+                original_number_format = cell.number_format
+                inferred_type = infer_cell_data_type(cell) # Call new helper
+                category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+
+                format_info["original_number_format"] = original_number_format
+                format_info["inferred_data_type"] = inferred_type
+                format_info["number_format_category"] = category
+                # format_info["number_format"] = cell.number_format # Redundant
 
                 # Store the format (handle merged ranges specially in format key)
                 if merged_range is not None:
