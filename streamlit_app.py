@@ -7,7 +7,9 @@ import openpyxl
 import tempfile
 import os
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import coordinate_from_string, column_index_from_string # For parsing cell/range refs
 import re # For parsing number format strings
+from collections import Counter # For compression insights (value frequency) - not strictly needed for current value_counts but good for future
 
 def get_download_link(json_data, filename="spreadsheet_data.json"):
     """
@@ -315,14 +317,12 @@ def extract_sheet_metadata(sheet):
     tab_color_str = None
     if hasattr(sheet, 'sheet_properties') and hasattr(sheet.sheet_properties, 'tabColor') and sheet.sheet_properties.tabColor:
         tab_color_obj = sheet.sheet_properties.tabColor
-        if hasattr(tab_color_obj, 'rgb') and tab_color_obj.rgb: # Standard ARGB string
+        if hasattr(tab_color_obj, 'rgb') and tab_color_obj.rgb:
             tab_color_str = str(tab_color_obj.rgb)
-        elif hasattr(tab_color_obj, 'indexed') and tab_color_obj.indexed > 0 : # Indexed color
+        elif hasattr(tab_color_obj, 'indexed') and tab_color_obj.indexed > 0 :
             tab_color_str = f"indexed_{tab_color_obj.indexed}"
-        # Theme/tint based colors are more complex and not handled here for simplicity
         elif hasattr(tab_color_obj, 'theme') and hasattr(tab_color_obj, 'tint'):
              tab_color_str = f"theme_{tab_color_obj.theme}_tint_{tab_color_obj.tint}"
-
 
     return {
         "visibility": visibility,
@@ -330,11 +330,178 @@ def extract_sheet_metadata(sheet):
         "tab_color": tab_color_str
     }
 
+def analyze_sheet_for_compression_insights(sheet_json_data):
+    """
+    Analyzes sheet JSON data for potential compression insights.
+
+    Args:
+        sheet_json_data (dict): The JSON data for a single sheet from the encoder's output.
+
+    Returns:
+        dict: A dictionary containing analysis insights regarding format redundancy,
+              value frequency, anchor usage, and cell counts.
+    """
+    insights = {}
+
+    if "formats" in sheet_json_data and isinstance(sheet_json_data["formats"], dict):
+        format_keys_json_strings = list(sheet_json_data["formats"].keys())
+        num_unique_formats_overall = len(format_keys_json_strings)
+        potential_redundancy_groups = []
+        base_format_groups = {}
+
+        for fmt_key_str in format_keys_json_strings:
+            try:
+                fmt_details = json.loads(fmt_key_str)
+                core_props_dict = {
+                    "font": fmt_details.get("font"),
+                    "alignment": fmt_details.get("alignment"),
+                    "border": fmt_details.get("border"),
+                    "fill": fmt_details.get("fill")
+                }
+                def make_hashable_format_core(obj):
+                    if isinstance(obj, dict):
+                        return tuple(sorted((k, make_hashable_format_core(v)) for k, v in obj.items()))
+                    if isinstance(obj, list):
+                        return tuple(make_hashable_format_core(elem) for elem in obj)
+                    return obj
+                base_format_key_tuple = make_hashable_format_core(core_props_dict)
+                if base_format_key_tuple not in base_format_groups:
+                    base_format_groups[base_format_key_tuple] = []
+                base_format_groups[base_format_key_tuple].append(fmt_details.get("number_format", "General"))
+            except json.JSONDecodeError:
+                print(f"Warning (compression_insights): Malformed format key string found: {fmt_key_str}")
+                continue
+
+        for base_fmt_tuple, number_format_list in base_format_groups.items():
+            if len(number_format_list) > 1:
+                unique_number_formats_in_group = sorted(list(set(number_format_list)))
+                if len(unique_number_formats_in_group) > 1:
+                    potential_redundancy_groups.append({
+                        "base_format_properties_hash": str(base_fmt_tuple),
+                        "differing_number_formats": unique_number_formats_in_group,
+                        "count_of_full_format_keys_in_group": len(number_format_list)
+                    })
+        insights["format_analysis"] = {
+            "num_unique_formats_overall": num_unique_formats_overall,
+            "num_base_format_groups": len(base_format_groups),
+            "potential_redundancy_groups": sorted(potential_redundancy_groups, key=lambda x: x["count_of_full_format_keys_in_group"], reverse=True)
+        }
+
+    if "cells" in sheet_json_data and isinstance(sheet_json_data["cells"], dict):
+        value_counts = {value: len(refs) for value, refs in sheet_json_data["cells"].items()}
+        sorted_values_by_freq = sorted(value_counts.items(), key=lambda item: (item[1], str(item[0])), reverse=True)
+        insights["value_frequency"] = {
+            "num_unique_values": len(sorted_values_by_freq),
+            "top_10_frequent_values": sorted_values_by_freq[:10]
+        }
+        total_cell_references = sum(len(refs) for refs in sheet_json_data["cells"].values())
+        insights["total_cell_references_in_index"] = total_cell_references
+
+    if "structural_anchors" in sheet_json_data and isinstance(sheet_json_data["structural_anchors"], dict):
+        insights["anchor_summary"] = {
+            "num_row_anchors": len(sheet_json_data["structural_anchors"].get("rows", [])),
+            "num_col_anchors": len(sheet_json_data["structural_anchors"].get("columns", []))
+        }
+    return insights
+
+def generate_common_value_map(sheet_json_data, top_n=5, min_len=4):
+    """
+    Identifies common, non-numeric string values in a sheet's cell data to create a map.
+
+    Args:
+        sheet_json_data (dict): The JSON data for a single sheet.
+        top_n (int): The number of most common string values to include in the map.
+        min_len (int): The minimum length for a string value to be considered.
+
+    Returns:
+        dict: A map where keys are placeholders (e.g., "@v1") and values are the
+              identified common string values. Returns an empty dict if no suitable
+              common strings are found.
+    """
+    if "cells" not in sheet_json_data or not isinstance(sheet_json_data["cells"], dict):
+        return {}
+
+    string_frequencies = {}
+    for value_str, refs in sheet_json_data["cells"].items():
+        if isinstance(value_str, str) and len(value_str) >= min_len:
+            # Attempt to filter out strings that are purely numeric
+            is_numeric_string = False
+            try:
+                # Check if it can be converted to float without error
+                float(value_str)
+                # Further check: does it look like a number (e.g. "123", "12.34", "-5")
+                # This regex checks for optional sign, digits, optional decimal part with digits
+                if re.fullmatch(r"[-+]?\d+(\.\d+)?", value_str):
+                    is_numeric_string = True
+            except ValueError:
+                # Not a float, so definitely not a simple numeric string in that sense
+                pass
+
+            if not is_numeric_string:
+                string_frequencies[value_str] = len(refs)
+
+    if not string_frequencies:
+        return {}
+
+    # Sort by frequency (desc) then by string length (desc, longer preferred for same freq), then alphabetically
+    sorted_common_strings = sorted(
+        string_frequencies.items(),
+        key=lambda item: (item[1], len(item[0]), item[0]),
+        reverse=True
+    )
+
+    value_map = {}
+    for i, (value, _freq) in enumerate(sorted_common_strings[:top_n]):
+        value_map[f"@v{i+1}"] = value
+
+    return value_map
+
+# Helper functions for chart-to-table linking
+def parse_cell_ref(cell_ref):
+    """Parses a cell reference string (e.g., 'A1', '$B$2') into 1-based (col, row) indices."""
+    if not cell_ref or not isinstance(cell_ref, str):
+        return None, None
+    try:
+        col_letter, row_idx = coordinate_from_string(cell_ref) # Handles '$'
+        col_idx = column_index_from_string(col_letter)
+        return col_idx, row_idx # 1-based
+    except Exception:
+        return None, None
+
+def parse_range_ref(range_str):
+    """Parses a range string (e.g., 'A1:B2' or 'A1') into 1-based (start_col, start_row, end_col, end_row) indices."""
+    if not range_str or not isinstance(range_str, str):
+        return None, None, None, None
+    try:
+        if ':' in range_str:
+            start_ref, end_ref = range_str.split(':', 1)
+            start_col, start_row = parse_cell_ref(start_ref)
+            end_col, end_row = parse_cell_ref(end_ref)
+        else: # Single cell range
+            start_col, start_row = parse_cell_ref(range_str)
+            end_col, end_row = start_col, start_row
+
+        if start_col is None or start_row is None or end_col is None or end_row is None:
+             return None, None, None, None
+        return start_col, start_row, end_col, end_row
+    except Exception:
+        return None, None, None, None
+
+def is_cell_within_parsed_range(cell_col_idx, cell_row_idx, r_start_col, r_start_row, r_end_col, r_end_row):
+    """Checks if a cell (1-based indices) is within a given parsed range (1-based indices)."""
+    if cell_col_idx is None or cell_row_idx is None or \
+       r_start_col is None or r_start_row is None or \
+       r_end_col is None or r_end_row is None:
+        return False
+    return (r_start_col <= cell_col_idx <= r_end_col and \
+            r_start_row <= cell_row_idx <= r_end_row)
+
 def main():
     """
     Main function to run the Streamlit application.
     Handles file uploads, processing (Excel/CSV), encoding via Spreadsheet_LLM_Encoder,
-    table detection, chart extraction, number format parsing, sheet metadata extraction,
+    and various post-processing steps (table detection, chart extraction, number format parsing,
+    sheet metadata extraction, compression insights, common value mapping, chart-table linking),
     and displays the resulting JSON.
     """
     st.title("Spreadsheet to Encoded JSON")
@@ -358,7 +525,6 @@ def main():
                     json_data = spreadsheet_llm_encode(processed_file_path_for_postprocessing, k=k_value)
 
                     if json_data and "sheets" in json_data and processed_file_path_for_postprocessing:
-                        # Load workbook once for all post-processing steps that need it
                         source_workbook = openpyxl.load_workbook(processed_file_path_for_postprocessing, data_only=True)
                         for sheet_name_wb in source_workbook.sheetnames:
                             if sheet_name_wb in json_data["sheets"]:
@@ -386,10 +552,30 @@ def main():
                                     if parsed_number_formats_map:
                                         sheet_data_node["parsed_number_formats"] = parsed_number_formats_map
 
-                                # Extract sheet-level metadata
                                 sheet_metadata = extract_sheet_metadata(current_sheet_obj)
                                 sheet_data_node["sheet_level_metadata"] = sheet_metadata
 
+                                compression_analysis_results = analyze_sheet_for_compression_insights(sheet_data_node)
+                                sheet_data_node["compression_insights"] = compression_analysis_results
+
+                                common_value_map_results = generate_common_value_map(sheet_data_node)
+                                if common_value_map_results:
+                                     sheet_data_node["common_value_map"] = common_value_map_results
+
+                                # Chart to Table Linking
+                                if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
+                                    for chart_dict in sheet_data_node["charts"]:
+                                        if chart_dict.get("anchor"):
+                                            chart_anchor_col, chart_anchor_row = parse_cell_ref(chart_dict["anchor"])
+                                            if chart_anchor_col and chart_anchor_row:
+                                                linked_tables = []
+                                                for table_dict in sheet_data_node["detected_tables"]:
+                                                    if table_dict.get("full_range"):
+                                                        r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
+                                                        if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
+                                                            linked_tables.append(table_dict["full_range"])
+                                                if linked_tables:
+                                                    chart_dict["linked_table_ranges"] = linked_tables
                 finally:
                     if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
                         os.remove(processed_file_path_for_postprocessing)
@@ -428,7 +614,7 @@ def main():
                                 if chart_list:
                                     sheet_data_node["charts"] = chart_list
 
-                                if "formats" in sheet_data_node: # Typically empty for CSV-derived sheets from this app
+                                if "formats" in sheet_data_node:
                                     parsed_number_formats_map = {}
                                     for fmt_key_json, _ in sheet_data_node["formats"].items():
                                         try:
@@ -441,9 +627,30 @@ def main():
                                     if parsed_number_formats_map:
                                         sheet_data_node["parsed_number_formats"] = parsed_number_formats_map
 
-                                # Extract sheet-level metadata
                                 sheet_metadata = extract_sheet_metadata(current_sheet_obj)
                                 sheet_data_node["sheet_level_metadata"] = sheet_metadata
+
+                                compression_analysis_results = analyze_sheet_for_compression_insights(sheet_data_node)
+                                sheet_data_node["compression_insights"] = compression_analysis_results
+
+                                common_value_map_results = generate_common_value_map(sheet_data_node)
+                                if common_value_map_results:
+                                     sheet_data_node["common_value_map"] = common_value_map_results
+
+                                # Chart to Table Linking (for CSV, charts won't exist from original, but tables might be detected)
+                                if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
+                                    for chart_dict in sheet_data_node["charts"]: # This list will be empty for CSVs
+                                        if chart_dict.get("anchor"):
+                                            chart_anchor_col, chart_anchor_row = parse_cell_ref(chart_dict["anchor"])
+                                            if chart_anchor_col and chart_anchor_row:
+                                                linked_tables = []
+                                                for table_dict in sheet_data_node["detected_tables"]:
+                                                    if table_dict.get("full_range"):
+                                                        r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
+                                                        if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
+                                                            linked_tables.append(table_dict["full_range"])
+                                                if linked_tables:
+                                                    chart_dict["linked_table_ranges"] = linked_tables
                 finally:
                     if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
                         os.remove(processed_file_path_for_postprocessing)
