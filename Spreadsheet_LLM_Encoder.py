@@ -23,7 +23,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     print(f"Processing Excel file: {excel_path}")
 
     try:
-        workbook = openpyxl.load_workbook(excel_path, data_only=True)
+        workbook = openpyxl.load_workbook(excel_path, data_only=False) # Changed data_only to False
         print(f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}")
     except FileNotFoundError:
         print(f"Error: File not found: {excel_path}")
