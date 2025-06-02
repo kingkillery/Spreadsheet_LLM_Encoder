@@ -582,80 +582,106 @@ def main():
 
             elif file_extension == 'csv':
                 st.write("Processing CSV: Converting to temporary Excel for encoding...")
-                df = pd.read_csv(uploaded_file)
-                wb = openpyxl.Workbook()
-                sheet = wb.active
-                sheet.title = "Sheet1"
-                for col_idx, column_name in enumerate(df.columns, 1):
-                    sheet.cell(row=1, column=col_idx, value=str(column_name))
-                for row_idx, row_data_tuple in enumerate(df.itertuples(index=False), 2):
-                    for col_idx, cell_value in enumerate(row_data_tuple, 1):
-                        sheet.cell(row=row_idx, column=col_idx, value=cell_value)
-
-                temp_csv_conversion_dir = tempfile.mkdtemp()
-                processed_file_path_for_postprocessing = os.path.join(temp_csv_conversion_dir, "temp_for_csv.xlsx")
-
+                df = None
+                json_data = None
                 try:
-                    wb.save(processed_file_path_for_postprocessing)
-                    json_data = spreadsheet_llm_encode(processed_file_path_for_postprocessing, k=k_value)
+                    df = pd.read_csv(uploaded_file)
+                except UnicodeDecodeError:
+                    st.warning("UTF-8 decoding failed. Trying latin-1...")
+                    try:
+                        uploaded_file.seek(0) # Reset file pointer
+                        df = pd.read_csv(uploaded_file, encoding='latin-1')
+                    except UnicodeDecodeError:
+                        st.warning("latin-1 decoding failed. Trying iso-8859-1...")
+                        try:
+                            uploaded_file.seek(0) # Reset file pointer
+                            df = pd.read_csv(uploaded_file, encoding='iso-8859-1')
+                        except Exception as e:
+                            st.error(f"Error reading CSV file: Could not decode file with UTF-8, latin-1, or ISO-8859-1 encoding. Please ensure the file is saved with one of these encodings. Error details: {e}")
+                            json_data = None # Explicitly set to None
+                    except Exception as e: # Catch other errors during latin-1 read
+                        st.error(f"Error reading CSV file with latin-1 encoding: {e}")
+                        json_data = None
+                except Exception as e: # Catch other errors during initial UTF-8 read
+                    st.error(f"Error reading CSV file: {e}")
+                    json_data = None
 
-                    if json_data and "sheets" in json_data and processed_file_path_for_postprocessing:
-                        source_workbook = openpyxl.load_workbook(processed_file_path_for_postprocessing, data_only=True)
-                        for sheet_name_wb in source_workbook.sheetnames:
-                             if sheet_name_wb in json_data["sheets"]:
-                                current_sheet_obj = source_workbook[sheet_name_wb]
-                                sheet_data_node = json_data["sheets"][sheet_name_wb]
+                if df is not None:
+                    wb = openpyxl.Workbook()
+                    sheet = wb.active
+                    sheet.title = "Sheet1"
+                    for col_idx, column_name in enumerate(df.columns, 1):
+                        sheet.cell(row=1, column=col_idx, value=str(column_name))
+                    for row_idx, row_data_tuple in enumerate(df.itertuples(index=False), 2):
+                        for col_idx, cell_value in enumerate(row_data_tuple, 1):
+                            sheet.cell(row=row_idx, column=col_idx, value=cell_value)
 
-                                detected_tables_list = detect_tables_in_sheet(current_sheet_obj)
-                                if detected_tables_list:
-                                    sheet_data_node["detected_tables"] = detected_tables_list
+                    temp_csv_conversion_dir = tempfile.mkdtemp()
+                    processed_file_path_for_postprocessing = os.path.join(temp_csv_conversion_dir, "temp_for_csv.xlsx")
 
-                                chart_list = extract_chart_info_from_sheet(current_sheet_obj)
-                                if chart_list:
-                                    sheet_data_node["charts"] = chart_list
+                    try:
+                        wb.save(processed_file_path_for_postprocessing)
+                        json_data = spreadsheet_llm_encode(processed_file_path_for_postprocessing, k=k_value)
 
-                                if "formats" in sheet_data_node:
-                                    parsed_number_formats_map = {}
-                                    for fmt_key_json, _ in sheet_data_node["formats"].items():
-                                        try:
-                                            fmt_details = json.loads(fmt_key_json)
-                                            number_format_str = fmt_details.get("number_format")
-                                            if number_format_str and number_format_str not in parsed_number_formats_map:
-                                                parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
-                                        except json.JSONDecodeError:
-                                            st.warning(f"Could not parse format key string: {fmt_key_json}")
-                                    if parsed_number_formats_map:
-                                        sheet_data_node["parsed_number_formats"] = parsed_number_formats_map
+                        if json_data and "sheets" in json_data and processed_file_path_for_postprocessing:
+                            source_workbook = openpyxl.load_workbook(processed_file_path_for_postprocessing, data_only=True)
+                            for sheet_name_wb in source_workbook.sheetnames:
+                                 if sheet_name_wb in json_data["sheets"]:
+                                    current_sheet_obj = source_workbook[sheet_name_wb]
+                                    sheet_data_node = json_data["sheets"][sheet_name_wb]
 
-                                sheet_metadata = extract_sheet_metadata(current_sheet_obj)
-                                sheet_data_node["sheet_level_metadata"] = sheet_metadata
+                                    detected_tables_list = detect_tables_in_sheet(current_sheet_obj)
+                                    if detected_tables_list:
+                                        sheet_data_node["detected_tables"] = detected_tables_list
 
-                                compression_analysis_results = analyze_sheet_for_compression_insights(sheet_data_node)
-                                sheet_data_node["compression_insights"] = compression_analysis_results
+                                    chart_list = extract_chart_info_from_sheet(current_sheet_obj)
+                                    if chart_list:
+                                        sheet_data_node["charts"] = chart_list
 
-                                common_value_map_results = generate_common_value_map(sheet_data_node)
-                                if common_value_map_results:
-                                     sheet_data_node["common_value_map"] = common_value_map_results
+                                    if "formats" in sheet_data_node:
+                                        parsed_number_formats_map = {}
+                                        for fmt_key_json, _ in sheet_data_node["formats"].items():
+                                            try:
+                                                fmt_details = json.loads(fmt_key_json)
+                                                number_format_str = fmt_details.get("number_format")
+                                                if number_format_str and number_format_str not in parsed_number_formats_map:
+                                                    parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
+                                            except json.JSONDecodeError:
+                                                st.warning(f"Could not parse format key string: {fmt_key_json}")
+                                        if parsed_number_formats_map:
+                                            sheet_data_node["parsed_number_formats"] = parsed_number_formats_map
 
-                                # Chart to Table Linking (for CSV, charts won't exist from original, but tables might be detected)
-                                if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
-                                    for chart_dict in sheet_data_node["charts"]: # This list will be empty for CSVs
-                                        if chart_dict.get("anchor"):
-                                            chart_anchor_col, chart_anchor_row = parse_cell_ref(chart_dict["anchor"])
-                                            if chart_anchor_col and chart_anchor_row:
-                                                linked_tables = []
-                                                for table_dict in sheet_data_node["detected_tables"]:
-                                                    if table_dict.get("full_range"):
-                                                        r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
-                                                        if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
-                                                            linked_tables.append(table_dict["full_range"])
-                                                if linked_tables:
-                                                    chart_dict["linked_table_ranges"] = linked_tables
-                finally:
-                    if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
-                        os.remove(processed_file_path_for_postprocessing)
-                    if temp_csv_conversion_dir and os.path.exists(temp_csv_conversion_dir):
-                        os.rmdir(temp_csv_conversion_dir)
+                                    sheet_metadata = extract_sheet_metadata(current_sheet_obj)
+                                    sheet_data_node["sheet_level_metadata"] = sheet_metadata
+
+                                    compression_analysis_results = analyze_sheet_for_compression_insights(sheet_data_node)
+                                    sheet_data_node["compression_insights"] = compression_analysis_results
+
+                                    common_value_map_results = generate_common_value_map(sheet_data_node)
+                                    if common_value_map_results:
+                                         sheet_data_node["common_value_map"] = common_value_map_results
+
+                                    # Chart to Table Linking (for CSV, charts won't exist from original, but tables might be detected)
+                                    if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
+                                        for chart_dict in sheet_data_node["charts"]: # This list will be empty for CSVs
+                                            if chart_dict.get("anchor"):
+                                                chart_anchor_col, chart_anchor_row = parse_cell_ref(chart_dict["anchor"])
+                                                if chart_anchor_col and chart_anchor_row:
+                                                    linked_tables = []
+                                                    for table_dict in sheet_data_node["detected_tables"]:
+                                                        if table_dict.get("full_range"):
+                                                            r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
+                                                            if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
+                                                                linked_tables.append(table_dict["full_range"])
+                                                    if linked_tables:
+                                                        chart_dict["linked_table_ranges"] = linked_tables
+                    finally:
+                        if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
+                            os.remove(processed_file_path_for_postprocessing)
+                        if 'temp_csv_conversion_dir' in locals() and temp_csv_conversion_dir and os.path.exists(temp_csv_conversion_dir):
+                            os.rmdir(temp_csv_conversion_dir)
+                # If df is None (all decoding failed), json_data remains None, and this block is skipped.
+                # The existing error message for failed processing will be shown later if json_data is still None.
 
             if json_data:
                 json_str = json.dumps(json_data, indent=2)
