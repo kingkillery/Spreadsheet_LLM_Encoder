@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spreadsheet-llm-encoder"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "openpyxl",
+    "pandas",
+    "streamlit"
+]
+
+[project.scripts]
+spreadsheet-llm-encode = "Spreadsheet_LLM_Encoder:main"
+
+[tool.setuptools]
+py-modules = ["Spreadsheet_LLM_Encoder", "streamlit_app", "temp_helpers"]

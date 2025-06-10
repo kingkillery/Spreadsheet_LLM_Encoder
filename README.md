@@ -26,6 +26,9 @@ cd Spreadsheet_LLM_Encoder
 
 # Install dependencies
 pip install -r requirements.txt
+
+# For development
+pip install -r requirements-dev.txt
 ```
 
 Required dependencies:
@@ -38,12 +41,18 @@ Required dependencies:
 
 ```bash
 python Spreadsheet_LLM_Encoder.py path/to/your/spreadsheet.xlsx --output output.json --k 2
+
+# Or install and use the CLI entry point
+pip install -e .
+spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --output output.json --k 2
 ```
 
 Parameters:
 - `excel_file`: Path to the Excel file you want to encode (required)
 - `--output`, `-o`: Path to save the JSON output (optional, defaults to input filename with '_spreadsheetllm.json' suffix)
 - `--k`: Neighborhood distance parameter for structural anchors (optional, default=2)
+
+The CLI prints compression ratios for each sheet and overall. These metrics are also stored in the output JSON under `compression_metrics`.
 
 ### Python API
 
@@ -91,7 +100,7 @@ Using the identified anchors, the encoder extracts cells within a configurable d
 
 ### 3. Inverted Index Creation
 
-Instead of storing each cell individually, the encoder creates an inverted index mapping content values to cell references. This significantly reduces redundancy and creates a more compact representation.
+Instead of storing each cell individually, the encoder creates an inverted index mapping content values to cell references. Identical values are merged into contiguous address ranges and empty cells are omitted, resulting in a compact representation.
 
 ### 4. Format Region Aggregation
 
@@ -101,14 +110,19 @@ string and groups contiguous cells that share both the type and the raw format
 string. This greatly reduces repeated style data in the output and improves
 compression.
 
-### 5. JSON Encoding
+### 5. Compression
+
+Heterogeneous rows and columns around anchors are retained while uniform regions are skipped. Numeric cells with identical formatting are clustered into aggregated ranges.
+
+### 6. JSON Encoding
 
 The final output is a structured JSON document containing:
 - File metadata
 - Sheet information
 - Structural anchors
-- Cell values (inverted index)
+- Cell values (inverted index with merged ranges)
 - Format regions
+- Numeric ranges
 
 ## Output Format
 
@@ -123,14 +137,37 @@ The encoder produces a JSON with this structure:
         "rows": [1, 5, 10],
         "columns": ["A", "C", "F"]
       },
-      "compressed_cells": {
-        "Header": ["A1", "B1", "C1"],
+      "cells": {
+        "Header": ["A1:C1"],
         "42": ["B5"],
         "Total": ["A10"]
       },
-      "format_regions": {
+      "formats": {
         "{format_definition}": ["A1:C1", "A10:F10"]
+      },
+      "numeric_ranges": {
+        "{format_definition}": ["B2:B8"]
       }
+    }
+  }
+}
+```
+
+### Compression Metrics
+
+The encoder reports token counts before and after each stage. These values are stored under `compression_metrics` in the JSON output. Example:
+
+```json
+"compression_metrics": {
+  "overall": {
+    "overall_ratio": 3.5
+  },
+  "sheets": {
+    "Sheet1": {
+      "anchor_ratio": 2.1,
+      "inverted_index_ratio": 3.0,
+      "format_ratio": 3.4,
+      "overall_ratio": 3.5
     }
   }
 }
@@ -148,6 +185,15 @@ Utilities for evaluating table detection are included:
 ## Research Background
 
 This implementation is based on the paper "[SpreadsheetLLM: Enabling LLMs to Understand Spreadsheets](https://www.microsoft.com/en-us/research/)" published by Microsoft Research in July 2024. The paper introduces a novel approach to encode spreadsheets for LLM comprehension that preserves structural integrity and visual semantics.
+
+## Development
+
+Before submitting, ensure that the code passes `flake8` checks:
+
+```bash
+pip install -r requirements-dev.txt
+flake8 .
+```
 
 ## License
 
