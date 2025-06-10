@@ -17,9 +17,20 @@ import sys
 
 logger = logging.getLogger(__name__)
 
+
+def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) -> float:
+    """Return the compression ratio given original and compressed token counts."""
+    if compressed_tokens == 0:
+        return 0.0
+    if original_tokens == 0:
+        return 1.0
+    return original_tokens / compressed_tokens
+
+
 def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     """
     Convert an Excel file to SpreadsheetLLM format, handling multiple sheets and detailed formats.
+    Identical cell values are merged into address ranges for a compact inverted index.
 
     Args:
         excel_path (str): Path to the Excel file.
@@ -45,9 +56,11 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         return None
 
     sheets_encoding = {}
+    compression_metrics = {"sheets": {}}
+    overall_orig = overall_anchor = overall_index = overall_format = overall_final = 0
 
     for sheet_name in workbook.sheetnames:
-        logger.info(f"\nProcessing sheet: {sheet_name}")
+        logger.info(f"\\nProcessing sheet: {sheet_name}")
         sheet = workbook[sheet_name]
 
         if sheet.max_row <= 1 and sheet.max_column <= 1:
@@ -60,38 +73,117 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         # print memory usage
         logger.info(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
 
+        # --- gather original tokens before any compression ---
+        original_cells = {}
+        for r in range(1, sheet.max_row + 1):
+            for c in range(1, sheet.max_column + 1):
+                cell_value = sheet.cell(row=r, column=c).value
+                if cell_value is not None:
+                    original_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
+        original_tokens = len(json.dumps(original_cells, ensure_ascii=False))
+
         row_anchors, col_anchors = find_structural_anchors(sheet, k)
         logger.info(
             f"Found {len(row_anchors)} row anchors and {len(col_anchors)} column anchors"
         )
 
         kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, 0)
-        logger.info(
-            f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns"
-        )
+
+        # Compress homogeneous regions before indexing
+        kept_rows, kept_cols = compress_homogeneous_regions(sheet, kept_rows, kept_cols)
+        logger.info(f"After compression: {len(kept_rows)} rows and {len(kept_cols)} columns kept")
+
+        anchor_cells = {}
+        for r in kept_rows:
+            for c in kept_cols:
+                cell_value = sheet.cell(row=r, column=c).value
+                if cell_value is not None:
+                    anchor_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
+        anchor_tokens = len(json.dumps(anchor_cells, ensure_ascii=False))
 
         inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
         logger.info(
             f"Created inverted index with {len(inverted_index)} unique values"
         )
 
+        merged_index = create_inverted_index_translation(inverted_index)
+        logger.info(
+            f"Merged values into {len(merged_index)} range groups"
+        )
+        index_tokens = len(json.dumps(merged_index, ensure_ascii=False))
+
         aggregated_formats = aggregate_formats(sheet, format_map)
         logger.info(
             f"Aggregated {len(aggregated_formats)} format regions"
         )
+        format_tokens = len(json.dumps(aggregated_formats, ensure_ascii=False))
 
-        sheets_encoding[sheet_name] = {
+        numeric_ranges = cluster_numeric_ranges(sheet, format_map)
+        logger.info(f"Clustered {len(numeric_ranges)} numeric format ranges")
+
+        sheet_encoding = {
             "structural_anchors": {
                 "rows": row_anchors,
                 "columns": [get_column_letter(c) for c in col_anchors]
             },
-            "compressed_cells": inverted_index,
-            "format_regions": aggregated_formats
+            "cells": merged_index,
+            "formats": aggregated_formats,
+            "numeric_ranges": numeric_ranges
         }
+
+        final_tokens = len(json.dumps(sheet_encoding, ensure_ascii=False))
+
+        ratio_anchor = calculate_compression_ratio(original_tokens, anchor_tokens)
+        ratio_index = calculate_compression_ratio(original_tokens, index_tokens)
+        ratio_format = calculate_compression_ratio(original_tokens, format_tokens)
+        ratio_final = calculate_compression_ratio(original_tokens, final_tokens)
+
+        compression_metrics["sheets"][sheet_name] = {
+            "original_tokens": original_tokens,
+            "after_anchor_tokens": anchor_tokens,
+            "after_inverted_index_tokens": index_tokens,
+            "after_format_tokens": format_tokens,
+            "final_tokens": final_tokens,
+            "anchor_ratio": ratio_anchor,
+            "inverted_index_ratio": ratio_index,
+            "format_ratio": ratio_format,
+            "overall_ratio": ratio_final,
+        }
+
+        logger.info(
+            f"{sheet_name} compression - Anchors: {ratio_anchor:.2f}x, "
+            f"Index: {ratio_index:.2f}x, Formats: {ratio_format:.2f}x, "
+            f"Overall: {ratio_final:.2f}x"
+        )
+
+        sheets_encoding[sheet_name] = sheet_encoding
+
+        overall_orig += original_tokens
+        overall_anchor += anchor_tokens
+        overall_index += index_tokens
+        overall_format += format_tokens
+        overall_final += final_tokens
+
+    compression_metrics["overall"] = {
+        "original_tokens": overall_orig,
+        "after_anchor_tokens": overall_anchor,
+        "after_inverted_index_tokens": overall_index,
+        "after_format_tokens": overall_format,
+        "final_tokens": overall_final,
+        "anchor_ratio": calculate_compression_ratio(overall_orig, overall_anchor),
+        "inverted_index_ratio": calculate_compression_ratio(overall_orig, overall_index),
+        "format_ratio": calculate_compression_ratio(overall_orig, overall_format),
+        "overall_ratio": calculate_compression_ratio(overall_orig, overall_final),
+    }
+
+    logger.info(
+        f"Overall compression: {compression_metrics['overall']['overall_ratio']:.2f}x"
+    )
 
     full_encoding = {
         "file_name": os.path.basename(excel_path),
-        "sheets": sheets_encoding
+        "sheets": sheets_encoding,
+        "compression_metrics": compression_metrics,
     }
 
     if output_path:
@@ -100,6 +192,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         logger.info(f"Saved SpreadsheetLLM encoding to {output_path}")
 
     return full_encoding
+
 
 def is_header_row(sheet, row_idx):
     """Simple heuristics to detect header rows."""
@@ -182,6 +275,7 @@ def find_structural_anchors(sheet, k=2):
     col_anchors = extract_k_neighborhood(col_candidates, k, sheet.max_column)
     return row_anchors, col_anchors
 
+
 def get_cell_format_key(cell):
     """Helper function to create a consistent format key for a cell."""
     format_info = {}
@@ -222,8 +316,8 @@ def get_cell_format_key(cell):
 
         # 5. Number Format (Original, Inferred Type, Category)
         original_number_format = cell.number_format
-        inferred_type = infer_cell_data_type(cell) # Call new helper
-        category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+        inferred_type = infer_cell_data_type(cell)  # Call new helper
+        category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
 
         format_info["original_number_format"] = original_number_format
         format_info["inferred_data_type"] = inferred_type
@@ -234,6 +328,7 @@ def get_cell_format_key(cell):
         format_info = {"error": str(e)}
 
     return json.dumps(format_info, sort_keys=True)
+
 
 def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
     """Extract cells within k units of any anchor."""
@@ -249,6 +344,32 @@ def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
             cols_to_keep.add(i)
 
     return sorted(list(rows_to_keep)), sorted(list(cols_to_keep))
+
+
+def compress_homogeneous_regions(sheet, rows, cols):
+    """Remove rows and columns that are homogeneous in value and format."""
+    def row_homogeneous(r):
+        vals = []
+        fmts = []
+        for c in cols:
+            cell = sheet.cell(row=r, column=c)
+            vals.append(cell.value)
+            fmts.append(cell.number_format)
+        return len(set(vals)) <= 1 and len(set(fmts)) <= 1
+
+    def col_homogeneous(c):
+        vals = []
+        fmts = []
+        for r in rows:
+            cell = sheet.cell(row=r, column=c)
+            vals.append(cell.value)
+            fmts.append(cell.number_format)
+        return len(set(vals)) <= 1 and len(set(fmts)) <= 1
+
+    filtered_rows = [r for r in rows if not row_homogeneous(r)]
+    filtered_cols = [c for c in cols if not col_homogeneous(c)]
+    return filtered_rows, filtered_cols
+
 
 def create_inverted_index(sheet, kept_rows, kept_cols):
     """Create an inverted index, handling merged cells."""
@@ -329,8 +450,8 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
 
                 # 5. Number Format (Original, Inferred Type, Category)
                 original_number_format = cell.number_format
-                inferred_type = infer_cell_data_type(cell) # Call new helper
-                category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+                inferred_type = infer_cell_data_type(cell)  # Call new helper
+                category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
 
                 format_info["original_number_format"] = original_number_format
                 format_info["inferred_data_type"] = inferred_type
@@ -351,6 +472,75 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                 logger.warning(f"Error processing format for cell {cell_ref}: {e}")
 
     return dict(inverted_index), dict(format_map)
+
+
+def create_inverted_index_translation(inverted_index):
+    """Merge cell references for identical values into ranges.
+
+    Args:
+        inverted_index (dict): Mapping of values to lists of cell references.
+
+    Returns:
+        dict: Mapping of values to merged cell ranges.
+    """
+
+    def _merge_refs(refs):
+        coords = []
+        for ref in sorted(set(refs)):
+            try:
+                col_letter, row = split_cell_ref(ref)
+                col = openpyxl.utils.cell.column_index_from_string(col_letter)
+                coords.append((row, col))
+            except Exception:
+                continue
+
+        cell_set = set(coords)
+        processed = set()
+        ranges = []
+
+        for row, col in sorted(coords):
+            if (row, col) in processed:
+                continue
+
+            width = 1
+            while (row, col + width) in cell_set and (row, col + width) not in processed:
+                width += 1
+
+            height = 1
+            expanding = True
+            while expanding:
+                next_row = row + height
+                for w in range(width):
+                    if (next_row, col + w) not in cell_set or (next_row, col + w) in processed:
+                        expanding = False
+                        break
+                if expanding:
+                    height += 1
+
+            end_col = col + width - 1
+            end_row = row + height - 1
+            start_ref = f"{get_column_letter(col)}{row}"
+            end_ref = f"{get_column_letter(end_col)}{end_row}"
+
+            if width == 1 and height == 1:
+                ranges.append(start_ref)
+            else:
+                ranges.append(f"{start_ref}:{end_ref}")
+
+            for r in range(row, row + height):
+                for c in range(col, col + width):
+                    processed.add((r, c))
+
+        return ranges
+
+    merged_index = {}
+    for value, refs in inverted_index.items():
+        if value is None or str(value).strip() == "":
+            continue
+        merged_index[value] = _merge_refs(refs)
+
+    return merged_index
+
 
 def aggregate_formats(sheet, format_map):
     """Aggregate cells with the same inferred type and number format string."""
@@ -417,9 +607,20 @@ def aggregate_formats(sheet, format_map):
 
     return dict(aggregated_formats)
 
+
+def cluster_numeric_ranges(sheet, format_map):
+    """Aggregate numeric cells with identical formatting into ranges."""
+    numeric_map = {
+        fmt: cells for fmt, cells in format_map.items()
+        if json.loads(fmt).get("inferred_data_type") == "numeric"
+    }
+    return aggregate_formats(sheet, numeric_map)
+
+
 def get_column_index(col_letter):
     """Convert column letter to index (A => 1, AA => 27)."""
     return openpyxl.utils.cell.column_index_from_string(col_letter)
+
 
 def split_cell_ref(cell_ref):
     """Split cell reference (e.g., 'A1') into column letter and row number."""
@@ -429,18 +630,35 @@ def split_cell_ref(cell_ref):
     # convert row to integer
     return col_str, int(row_str)
 
-if __name__ == "__main__":
+
+def main():
+    """Console script entry point for SpreadsheetLLM encoder."""
     logging.basicConfig(level=logging.INFO)
     import argparse
 
-    parser = argparse.ArgumentParser(description='Convert Excel files to SpreadsheetLLM format')
-    parser.add_argument('excel_file', help='Path to the Excel file')
-    parser.add_argument('--output', '-o', help='Output JSON file path (default: same as input with .json extension)')
-    parser.add_argument('--k', type=int, default=2, help='Neighborhood distance parameter (default: 2)')
+    parser = argparse.ArgumentParser(
+        description="Convert Excel files to SpreadsheetLLM format"
+    )
+    parser.add_argument("excel_file", help="Path to the Excel file")
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Output JSON file path (default: same as input with .json extension)",
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=2,
+        help="Neighborhood distance parameter (default: 2)",
+    )
 
     args = parser.parse_args()
 
     if not args.output:
-        args.output = os.path.splitext(args.excel_file)[0] + '_spreadsheetllm.json'
+        args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
 
     spreadsheet_llm_encode(args.excel_file, args.output, args.k)
+
+
+if __name__ == "__main__":
+    main()
