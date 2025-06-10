@@ -1,13 +1,12 @@
 import os
-import pandas as pd  # Used for some data manipulation
 import openpyxl
 import json
 from temp_helpers import infer_cell_data_type, categorize_number_format
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_from_string
-from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
+
 import sys
+
 
 def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     """
@@ -24,7 +23,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     print(f"Processing Excel file: {excel_path}")
 
     try:
-        workbook = openpyxl.load_workbook(excel_path, data_only=False) # Changed data_only to False
+        workbook = openpyxl.load_workbook(excel_path, data_only=False)  # Changed data_only to False
         print(f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}")
     except FileNotFoundError:
         print(f"Error: File not found: {excel_path}")
@@ -80,6 +79,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
 
     return full_encoding
 
+
 def find_structural_anchors(sheet):
     """Find structural anchors based on cell count and format changes."""
     row_counts = [0] * (sheet.max_row + 1)
@@ -107,8 +107,8 @@ def find_structural_anchors(sheet):
             # Check for significant changes in *both* count and format variety
             if (abs(row_counts[r] - row_counts[r - 1]) > 2 or
                 abs(row_counts[r] - row_counts[r + 1]) > 2 or
-                len(row_formats[r]) != len(row_formats[r-1]) or
-                len(row_formats[r]) != len(row_formats[r+1])):
+                len(row_formats[r]) != len(row_formats[r - 1]) or
+                    len(row_formats[r]) != len(row_formats[r + 1])):
                 row_anchors.append(r)
 
     col_anchors = []
@@ -118,11 +118,12 @@ def find_structural_anchors(sheet):
         elif c > 1 and c < len(col_counts) - 1:
             if (abs(col_counts[c] - col_counts[c - 1]) > 2 or
                 abs(col_counts[c] - col_counts[c + 1]) > 2 or
-                len(col_formats[c]) != len(col_formats[c-1]) or
-                len(col_formats[c]) != len(col_formats[c+1])):
+                len(col_formats[c]) != len(col_formats[c - 1]) or
+                    len(col_formats[c]) != len(col_formats[c + 1])):
                 col_anchors.append(c)
 
     return row_anchors, col_anchors
+
 
 def get_cell_format_key(cell):
     """Helper function to create a consistent format key for a cell."""
@@ -150,22 +151,26 @@ def get_cell_format_key(cell):
         border = cell.border
         format_info["border"] = {
             side: {
-                "style": getattr(border, side).style,
-                "color": str(getattr(border, side).color.rgb) if getattr(border, side).color and getattr(border, side).color.rgb else None,
-            } for side in ["left", "right", "top", "bottom"]
-        }
+                "style": getattr(
+                    border, side).style, "color": str(
+                    getattr(
+                        border, side).color.rgb) if getattr(
+                        border, side).color and getattr(
+                            border, side).color.rgb else None, } for side in [
+                                "left", "right", "top", "bottom"]}
 
         # 4. Fill (Background Color)
         fill = cell.fill
         if hasattr(fill, 'patternType') and fill.patternType == "solid":
-            format_info["fill"] = {"color": str(fill.start_color.index) if fill.start_color and fill.start_color.index else None}
+            format_info["fill"] = {"color": str(fill.start_color.index)
+                                   if fill.start_color and fill.start_color.index else None}
         else:
             format_info["fill"] = {"color": None}
 
         # 5. Number Format (Original, Inferred Type, Category)
         original_number_format = cell.number_format
-        inferred_type = infer_cell_data_type(cell) # Call new helper
-        category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+        inferred_type = infer_cell_data_type(cell)  # Call new helper
+        category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
 
         format_info["original_number_format"] = original_number_format
         format_info["inferred_data_type"] = inferred_type
@@ -176,6 +181,7 @@ def get_cell_format_key(cell):
         format_info = {"error": str(e)}
 
     return json.dumps(format_info, sort_keys=True)
+
 
 def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
     """Extract cells within k units of any anchor."""
@@ -191,6 +197,7 @@ def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
             cols_to_keep.add(i)
 
     return sorted(list(rows_to_keep)), sorted(list(cols_to_keep))
+
 
 def create_inverted_index(sheet, kept_rows, kept_cols):
     """Create an inverted index, handling merged cells."""
@@ -257,22 +264,26 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                 border = cell.border
                 format_info["border"] = {
                     side: {
-                        "style": getattr(border, side).style,
-                        "color": str(getattr(border, side).color.rgb) if getattr(border, side).color and getattr(border, side).color.rgb else None,
-                    } for side in ["left", "right", "top", "bottom"]
-                }
+                        "style": getattr(
+                            border, side).style, "color": str(
+                            getattr(
+                                border, side).color.rgb) if getattr(
+                            border, side).color and getattr(
+                            border, side).color.rgb else None, } for side in [
+                                "left", "right", "top", "bottom"]}
 
                 # 4. Fill (Background Color)
                 fill = cell.fill
                 if hasattr(fill, 'patternType') and fill.patternType == "solid":
-                    format_info["fill"] = {"color": str(fill.start_color.index) if fill.start_color and fill.start_color.index else None}
+                    format_info["fill"] = {"color": str(fill.start_color.index)
+                                           if fill.start_color and fill.start_color.index else None}
                 else:
                     format_info["fill"] = {"color": None}
 
                 # 5. Number Format (Original, Inferred Type, Category)
                 original_number_format = cell.number_format
-                inferred_type = infer_cell_data_type(cell) # Call new helper
-                category = categorize_number_format(original_number_format, inferred_type) # Call new helper
+                inferred_type = infer_cell_data_type(cell)  # Call new helper
+                category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
 
                 format_info["original_number_format"] = original_number_format
                 format_info["inferred_data_type"] = inferred_type
@@ -294,6 +305,7 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
 
     return dict(inverted_index), dict(format_map)
 
+
 def aggregate_formats(sheet, format_map):
     """Aggregate cells with the same format into rectangular regions."""
     aggregated_formats = defaultdict(list)
@@ -311,17 +323,17 @@ def aggregate_formats(sheet, format_map):
                     start_ref, end_ref = merged_range.split(':')
                     start_col_letter, start_row = split_cell_ref(start_ref)
                     end_col_letter, end_row = split_cell_ref(end_ref)
-                    
+
                     start_col = openpyxl.utils.cell.column_index_from_string(start_col_letter)
                     end_col = openpyxl.utils.cell.column_index_from_string(end_col_letter)
-                    
+
                     for r in range(start_row, end_row + 1):
                         for c in range(start_col, end_col + 1):
                             cell_ref = f"{get_column_letter(c)}{r}"
                             processed_cells.add(cell_ref)
                 except Exception as e:
                     print(f"Warning: Error processing merged range {format_data['merged_range']}: {e}")
-                
+
                 continue  # Skip to next format
 
             if len(cells) < 3:  # Skip very small format groups
@@ -349,7 +361,7 @@ def aggregate_formats(sheet, format_map):
                 # Try expanding in all directions
                 max_width = min(20, sheet.max_column - start_col + 1)  # Limit search to reasonable size
                 max_height = min(20, sheet.max_row - start_row + 1)    # Limit search to reasonable size
-                
+
                 for width in range(1, max_width + 1):
                     for height in range(1, max_height + 1):
                         valid_rectangle = True
@@ -385,9 +397,11 @@ def aggregate_formats(sheet, format_map):
 
     return dict(aggregated_formats)
 
+
 def get_column_index(col_letter):
     """Convert column letter to index (A => 1, AA => 27)."""
     return openpyxl.utils.cell.column_index_from_string(col_letter)
+
 
 def split_cell_ref(cell_ref):
     """Split cell reference (e.g., 'A1') into column letter and row number."""
@@ -396,6 +410,7 @@ def split_cell_ref(cell_ref):
 
     # convert row to integer
     return col_str, int(row_str)
+
 
 if __name__ == "__main__":
     import argparse

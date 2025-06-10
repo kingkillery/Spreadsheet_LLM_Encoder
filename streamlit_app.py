@@ -7,9 +7,10 @@ import openpyxl
 import tempfile
 import os
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_from_string, column_index_from_string # For parsing cell/range refs
-import re # For parsing number format strings
-from collections import Counter # For compression insights (value frequency) - not strictly needed for current value_counts but good for future
+from openpyxl.utils.cell import coordinate_from_string, column_index_from_string  # For parsing cell/range refs
+import re  # For parsing number format strings
+# For compression insights (value frequency) - not strictly needed for current value_counts but good for future
+
 
 def get_download_link(json_data, filename="spreadsheet_data.json"):
     """
@@ -27,6 +28,7 @@ def get_download_link(json_data, filename="spreadsheet_data.json"):
     b64 = base64.b64encode(json_str.encode()).decode()
     href = f'<a href="data:file/json;base64,{b64}" download="{filename}">Download JSON File</a>'
     return href
+
 
 def detect_tables_in_sheet(sheet):
     """
@@ -59,16 +61,16 @@ def detect_tables_in_sheet(sheet):
     except Exception:
         return []
 
-    if max_row == 0 or max_col == 0 :
-        if sheet.max_row == 1 and sheet.max_column == 1 and sheet.cell(1,1).value is None:
-             return []
+    if max_row == 0 or max_col == 0:
+        if sheet.max_row == 1 and sheet.max_column == 1 and sheet.cell(1, 1).value is None:
+            return []
         try:
             sheet.calculate_dimension(force=True)
             min_row, min_col, max_row, max_col = sheet.min_row, sheet.min_column, sheet.max_row, sheet.max_column
-            if max_row == 0 or max_col == 0 : return []
-        except:
+            if max_row == 0 or max_col == 0:
+                return []
+        except BaseException:
             return []
-
 
     r_idx = min_row
     while r_idx <= max_row:
@@ -89,7 +91,8 @@ def detect_tables_in_sheet(sheet):
 
                 if cell.font and cell.font.bold:
                     num_bold += 1
-                if cell.border and cell.border.bottom and cell.border.bottom.style is not None and cell.border.bottom.style != 'none':
+                if cell.border and cell.border.bottom and cell.border.bottom.style is not None \
+                        and cell.border.bottom.style != 'none':
                     num_bottom_border += 1
                 if isinstance(cell.value, str):
                     num_string_cells += 1
@@ -100,13 +103,13 @@ def detect_tables_in_sheet(sheet):
         if num_populated_cells_in_row > 1:
             if (num_bold / num_populated_cells_in_row > 0.5) or \
                (num_bottom_border / num_populated_cells_in_row > 0.5) or \
-               (num_string_cells == num_populated_cells_in_row and \
-                num_string_cells > 0 and \
-                (num_all_caps_strings / num_string_cells > 0.5)):
+               (num_string_cells == num_populated_cells_in_row and
+                num_string_cells > 0 and
+                    (num_all_caps_strings / num_string_cells > 0.5)):
                 is_header_candidate = True
         elif num_populated_cells_in_row == 1:
-             if num_bold == 1 or num_bottom_border == 1 or (num_string_cells == 1 and num_all_caps_strings ==1):
-                 is_header_candidate = True
+            if num_bold == 1 or num_bottom_border == 1 or (num_string_cells == 1 and num_all_caps_strings == 1):
+                is_header_candidate = True
 
         if is_header_candidate:
             header_row_idx = r_idx
@@ -124,27 +127,37 @@ def detect_tables_in_sheet(sheet):
                 for c_idx_data in range(min_col, max_col + 1):
                     cell_data = sheet.cell(row=data_r_idx, column=c_idx_data)
                     if cell_data.value is not None and str(cell_data.value).strip() != "":
-                        data_row_populated_cells +=1
+                        data_row_populated_cells += 1
                         data_row_min_col_actual = min(data_row_min_col_actual, c_idx_data)
                         data_row_max_col_actual = max(data_row_max_col_actual, c_idx_data)
 
                 if data_row_populated_cells == 0:
                     break
 
-                if data_row_populated_cells > 0 and \
-                   (data_row_max_col_actual >= table_min_col_overall and data_row_min_col_actual <= table_max_col_overall) :
+                if data_row_populated_cells > 0 and (
+                        data_row_max_col_actual >= table_min_col_overall
+                        and data_row_min_col_actual <= table_max_col_overall
+                ):
                     data_end_row_idx = data_r_idx
-                    table_min_col_overall = min(table_min_col_overall, data_row_min_col_actual)
+                    table_min_col_overall = min(
+                        table_min_col_overall, data_row_min_col_actual)
                     table_max_col_overall = max(table_max_col_overall, data_row_max_col_actual)
                 else:
                     break
 
             if data_end_row_idx >= header_row_idx:
-                header_range_str = f"{get_column_letter(table_min_col_overall)}{header_row_idx}:{get_column_letter(table_max_col_overall)}{header_row_idx}"
+                header_range_str = f"{
+                    get_column_letter(table_min_col_overall)}{header_row_idx}:{
+                    get_column_letter(table_max_col_overall)}{header_row_idx}"
                 data_range_str = None
                 if data_end_row_idx > header_row_idx:
-                    data_range_str = f"{get_column_letter(table_min_col_overall)}{header_row_idx + 1}:{get_column_letter(table_max_col_overall)}{data_end_row_idx}"
-                full_range_str = f"{get_column_letter(table_min_col_overall)}{header_row_idx}:{get_column_letter(table_max_col_overall)}{data_end_row_idx}"
+                    data_range_str = f"{
+                        get_column_letter(table_min_col_overall)}{
+                        header_row_idx + 1}:{
+                        get_column_letter(table_max_col_overall)}{data_end_row_idx}"
+                full_range_str = f"{
+                    get_column_letter(table_min_col_overall)}{header_row_idx}:{
+                    get_column_letter(table_max_col_overall)}{data_end_row_idx}"
 
                 tables.append({
                     "full_range": full_range_str,
@@ -156,6 +169,7 @@ def detect_tables_in_sheet(sheet):
                 continue
         r_idx += 1
     return tables
+
 
 def extract_chart_info_from_sheet(sheet):
     """
@@ -196,7 +210,7 @@ def extract_chart_info_from_sheet(sheet):
                 elif hasattr(anchor, 'oneCellAnchor'):
                     _from = getattr(anchor.oneCellAnchor, '_from', None)
                     if _from and hasattr(_from, 'col') and hasattr(_from, 'row'):
-                         anchor_cell_str = f"{get_column_letter(_from.col + 1)}{_from.row + 1}"
+                        anchor_cell_str = f"{get_column_letter(_from.col + 1)}{_from.row + 1}"
                     elif hasattr(anchor.oneCellAnchor, 'cell') and hasattr(anchor.oneCellAnchor.cell, 'coordinate'):
                         anchor_cell_str = anchor.oneCellAnchor.cell.coordinate
                 elif hasattr(anchor, '_from') and hasattr(anchor._from, 'col') and hasattr(anchor._from, 'row'):
@@ -211,6 +225,7 @@ def extract_chart_info_from_sheet(sheet):
             "anchor": anchor_cell_str
         })
     return chart_info_list
+
 
 def parse_number_format_string(format_str):
     """
@@ -271,7 +286,7 @@ def parse_number_format_string(format_str):
         if re.fullmatch(r'm{1,5}', format_str_lower):
             is_date = True
         elif ('h' in format_str_lower or 's' in format_str_lower) and 'm' in format_str_lower:
-             is_time = True
+            is_time = True
 
     if is_date and is_time:
         return {"type": "datetime", "format_tokens": original_format_str, "original": original_format_str}
@@ -297,9 +312,14 @@ def parse_number_format_string(format_str):
             if m:
                 decimals = len(m.group(1))
         has_comma = "," in format_str.split(".")[0]
-        return {"type": "number", "decimals": decimals, "thousands_separator": has_comma, "original": original_format_str}
+        return {
+            "type": "number",
+            "decimals": decimals,
+            "thousands_separator": has_comma,
+            "original": original_format_str}
 
     return {"type": "unknown", "original": original_format_str}
+
 
 def extract_sheet_metadata(sheet):
     """
@@ -312,23 +332,30 @@ def extract_sheet_metadata(sheet):
         dict: A dictionary containing sheet metadata.
     """
     visibility = sheet.sheet_state if hasattr(sheet, 'sheet_state') else 'visible'
-    is_protected = sheet.protection.sheet if hasattr(sheet, 'protection') and hasattr(sheet.protection, 'sheet') else False
+    is_protected = sheet.protection.sheet if hasattr(
+        sheet, 'protection') and hasattr(
+        sheet.protection, 'sheet') else False
 
     tab_color_str = None
-    if hasattr(sheet, 'sheet_properties') and hasattr(sheet.sheet_properties, 'tabColor') and sheet.sheet_properties.tabColor:
+    if hasattr(
+            sheet,
+            'sheet_properties') and hasattr(
+            sheet.sheet_properties,
+            'tabColor') and sheet.sheet_properties.tabColor:
         tab_color_obj = sheet.sheet_properties.tabColor
         if hasattr(tab_color_obj, 'rgb') and tab_color_obj.rgb:
             tab_color_str = str(tab_color_obj.rgb)
-        elif hasattr(tab_color_obj, 'indexed') and tab_color_obj.indexed > 0 :
+        elif hasattr(tab_color_obj, 'indexed') and tab_color_obj.indexed > 0:
             tab_color_str = f"indexed_{tab_color_obj.indexed}"
         elif hasattr(tab_color_obj, 'theme') and hasattr(tab_color_obj, 'tint'):
-             tab_color_str = f"theme_{tab_color_obj.theme}_tint_{tab_color_obj.tint}"
+            tab_color_str = f"theme_{tab_color_obj.theme}_tint_{tab_color_obj.tint}"
 
     return {
         "visibility": visibility,
         "is_protected": is_protected,
         "tab_color": tab_color_str
     }
+
 
 def analyze_sheet_for_compression_insights(sheet_json_data):
     """
@@ -358,6 +385,7 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
                     "border": fmt_details.get("border"),
                     "fill": fmt_details.get("fill")
                 }
+
                 def make_hashable_format_core(obj):
                     if isinstance(obj, dict):
                         return tuple(sorted((k, make_hashable_format_core(v)) for k, v in obj.items()))
@@ -384,8 +412,10 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
         insights["format_analysis"] = {
             "num_unique_formats_overall": num_unique_formats_overall,
             "num_base_format_groups": len(base_format_groups),
-            "potential_redundancy_groups": sorted(potential_redundancy_groups, key=lambda x: x["count_of_full_format_keys_in_group"], reverse=True)
-        }
+            "potential_redundancy_groups": sorted(
+                potential_redundancy_groups,
+                key=lambda x: x["count_of_full_format_keys_in_group"],
+                reverse=True)}
 
     if "cells" in sheet_json_data and isinstance(sheet_json_data["cells"], dict):
         value_counts = {value: len(refs) for value, refs in sheet_json_data["cells"].items()}
@@ -403,6 +433,7 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
             "num_col_anchors": len(sheet_json_data["structural_anchors"].get("columns", []))
         }
     return insights
+
 
 def generate_common_value_map(sheet_json_data, top_n=5, min_len=4):
     """
@@ -452,21 +483,24 @@ def generate_common_value_map(sheet_json_data, top_n=5, min_len=4):
 
     value_map = {}
     for i, (value, _freq) in enumerate(sorted_common_strings[:top_n]):
-        value_map[f"@v{i+1}"] = value
+        value_map[f"@v{i + 1}"] = value
 
     return value_map
 
 # Helper functions for chart-to-table linking
+
+
 def parse_cell_ref(cell_ref):
     """Parses a cell reference string (e.g., 'A1', '$B$2') into 1-based (col, row) indices."""
     if not cell_ref or not isinstance(cell_ref, str):
         return None, None
     try:
-        col_letter, row_idx = coordinate_from_string(cell_ref) # Handles '$'
+        col_letter, row_idx = coordinate_from_string(cell_ref)  # Handles '$'
         col_idx = column_index_from_string(col_letter)
-        return col_idx, row_idx # 1-based
+        return col_idx, row_idx  # 1-based
     except Exception:
         return None, None
+
 
 def parse_range_ref(range_str):
     """Parses a range string (e.g., 'A1:B2' or 'A1') into 1-based (start_col, start_row, end_col, end_row) indices."""
@@ -477,15 +511,16 @@ def parse_range_ref(range_str):
             start_ref, end_ref = range_str.split(':', 1)
             start_col, start_row = parse_cell_ref(start_ref)
             end_col, end_row = parse_cell_ref(end_ref)
-        else: # Single cell range
+        else:  # Single cell range
             start_col, start_row = parse_cell_ref(range_str)
             end_col, end_row = start_col, start_row
 
         if start_col is None or start_row is None or end_col is None or end_row is None:
-             return None, None, None, None
+            return None, None, None, None
         return start_col, start_row, end_col, end_row
     except Exception:
         return None, None, None, None
+
 
 def is_cell_within_parsed_range(cell_col_idx, cell_row_idx, r_start_col, r_start_row, r_end_col, r_end_row):
     """Checks if a cell (1-based indices) is within a given parsed range (1-based indices)."""
@@ -493,8 +528,9 @@ def is_cell_within_parsed_range(cell_col_idx, cell_row_idx, r_start_col, r_start
        r_start_col is None or r_start_row is None or \
        r_end_col is None or r_end_row is None:
         return False
-    return (r_start_col <= cell_col_idx <= r_end_col and \
+    return (r_start_col <= cell_col_idx <= r_end_col and
             r_start_row <= cell_row_idx <= r_end_row)
+
 
 def main():
     """
@@ -546,7 +582,11 @@ def main():
                                             fmt_details = json.loads(fmt_key_json)
                                             number_format_str = fmt_details.get("number_format")
                                             if number_format_str and number_format_str not in parsed_number_formats_map:
-                                                parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
+                                                parsed_number_formats_map[
+                                                    number_format_str
+                                                ] = parse_number_format_string(
+                                                    number_format_str
+                                                )
                                         except json.JSONDecodeError:
                                             st.warning(f"Could not parse format key string: {fmt_key_json}")
                                     if parsed_number_formats_map:
@@ -560,7 +600,7 @@ def main():
 
                                 common_value_map_results = generate_common_value_map(sheet_data_node)
                                 if common_value_map_results:
-                                     sheet_data_node["common_value_map"] = common_value_map_results
+                                    sheet_data_node["common_value_map"] = common_value_map_results
 
                                 # Chart to Table Linking
                                 if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
@@ -571,13 +611,25 @@ def main():
                                                 linked_tables = []
                                                 for table_dict in sheet_data_node["detected_tables"]:
                                                     if table_dict.get("full_range"):
-                                                        r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
-                                                        if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
-                                                            linked_tables.append(table_dict["full_range"])
+                                                        r_start_col, r_start_row, r_end_col, r_end_row = (
+                                                            parse_range_ref(
+                                                                table_dict["full_range"])
+                                                        )
+                                                        if r_start_col and is_cell_within_parsed_range(
+                                                                chart_anchor_col,
+                                                                chart_anchor_row,
+                                                                r_start_col,
+                                                                r_start_row,
+                                                                r_end_col,
+                                                                r_end_row,
+                                                        ):
+                                                            linked_tables.append(
+                                                                table_dict["full_range"])
                                                 if linked_tables:
                                                     chart_dict["linked_table_ranges"] = linked_tables
                 finally:
-                    if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
+                    if processed_file_path_for_postprocessing and os.path.exists(
+                            processed_file_path_for_postprocessing):
                         os.remove(processed_file_path_for_postprocessing)
 
             elif file_extension == 'csv':
@@ -589,20 +641,24 @@ def main():
                 except UnicodeDecodeError:
                     st.warning("UTF-8 decoding failed. Trying latin-1...")
                     try:
-                        uploaded_file.seek(0) # Reset file pointer
+                        uploaded_file.seek(0)  # Reset file pointer
                         df = pd.read_csv(uploaded_file, encoding='latin-1')
                     except UnicodeDecodeError:
                         st.warning("latin-1 decoding failed. Trying iso-8859-1...")
                         try:
-                            uploaded_file.seek(0) # Reset file pointer
+                            uploaded_file.seek(0)  # Reset file pointer
                             df = pd.read_csv(uploaded_file, encoding='iso-8859-1')
                         except Exception as e:
-                            st.error(f"Error reading CSV file: Could not decode file with UTF-8, latin-1, or ISO-8859-1 encoding. Please ensure the file is saved with one of these encodings. Error details: {e}")
-                            json_data = None # Explicitly set to None
-                    except Exception as e: # Catch other errors during latin-1 read
+                            st.error(
+                                "Error reading CSV file: Could not decode file with "
+                                "UTF-8, latin-1, or ISO-8859-1 encoding. Please ensure "
+                                f"the file is saved with one of these encodings. Error details: {e}"
+                            )
+                            json_data = None  # Explicitly set to None
+                    except Exception as e:  # Catch other errors during latin-1 read
                         st.error(f"Error reading CSV file with latin-1 encoding: {e}")
                         json_data = None
-                except Exception as e: # Catch other errors during initial UTF-8 read
+                except Exception as e:  # Catch other errors during initial UTF-8 read
                     st.error(f"Error reading CSV file: {e}")
                     json_data = None
 
@@ -624,9 +680,10 @@ def main():
                         json_data = spreadsheet_llm_encode(processed_file_path_for_postprocessing, k=k_value)
 
                         if json_data and "sheets" in json_data and processed_file_path_for_postprocessing:
-                            source_workbook = openpyxl.load_workbook(processed_file_path_for_postprocessing, data_only=True)
+                            source_workbook = openpyxl.load_workbook(
+                                processed_file_path_for_postprocessing, data_only=True)
                             for sheet_name_wb in source_workbook.sheetnames:
-                                 if sheet_name_wb in json_data["sheets"]:
+                                if sheet_name_wb in json_data["sheets"]:
                                     current_sheet_obj = source_workbook[sheet_name_wb]
                                     sheet_data_node = json_data["sheets"][sheet_name_wb]
 
@@ -644,8 +701,16 @@ def main():
                                             try:
                                                 fmt_details = json.loads(fmt_key_json)
                                                 number_format_str = fmt_details.get("number_format")
-                                                if number_format_str and number_format_str not in parsed_number_formats_map:
-                                                    parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
+                                                if (
+                                                    number_format_str
+                                                    and number_format_str
+                                                    not in parsed_number_formats_map
+                                                ):
+                                                    parsed_number_formats_map[
+                                                        number_format_str
+                                                    ] = parse_number_format_string(
+                                                        number_format_str
+                                                    )
                                             except json.JSONDecodeError:
                                                 st.warning(f"Could not parse format key string: {fmt_key_json}")
                                         if parsed_number_formats_map:
@@ -654,31 +719,51 @@ def main():
                                     sheet_metadata = extract_sheet_metadata(current_sheet_obj)
                                     sheet_data_node["sheet_level_metadata"] = sheet_metadata
 
-                                    compression_analysis_results = analyze_sheet_for_compression_insights(sheet_data_node)
+                                    compression_analysis_results = analyze_sheet_for_compression_insights(
+                                        sheet_data_node)
                                     sheet_data_node["compression_insights"] = compression_analysis_results
 
                                     common_value_map_results = generate_common_value_map(sheet_data_node)
                                     if common_value_map_results:
-                                         sheet_data_node["common_value_map"] = common_value_map_results
+                                        sheet_data_node["common_value_map"] = common_value_map_results
 
-                                    # Chart to Table Linking (for CSV, charts won't exist from original, but tables might be detected)
+                                    # Chart to Table Linking (for CSV, charts won't exist from original, but
+                                    # tables might be detected)
                                     if "charts" in sheet_data_node and "detected_tables" in sheet_data_node:
-                                        for chart_dict in sheet_data_node["charts"]: # This list will be empty for CSVs
+                                        for chart_dict in sheet_data_node["charts"]:  # This list will be empty for CSVs
                                             if chart_dict.get("anchor"):
-                                                chart_anchor_col, chart_anchor_row = parse_cell_ref(chart_dict["anchor"])
+                                                chart_anchor_col, chart_anchor_row = parse_cell_ref(
+                                                    chart_dict["anchor"])
                                                 if chart_anchor_col and chart_anchor_row:
                                                     linked_tables = []
                                                     for table_dict in sheet_data_node["detected_tables"]:
                                                         if table_dict.get("full_range"):
-                                                            r_start_col, r_start_row, r_end_col, r_end_row = parse_range_ref(table_dict["full_range"])
-                                                            if r_start_col and is_cell_within_parsed_range(chart_anchor_col, chart_anchor_row, r_start_col, r_start_row, r_end_col, r_end_row):
-                                                                linked_tables.append(table_dict["full_range"])
+                                                            r_start_col, r_start_row, r_end_col, r_end_row = (
+                                                                parse_range_ref(
+                                                                    table_dict["full_range"])
+                                                            )
+                                                            if r_start_col and is_cell_within_parsed_range(
+                                                                    chart_anchor_col,
+                                                                    chart_anchor_row,
+                                                                    r_start_col,
+                                                                    r_start_row,
+                                                                    r_end_col,
+                                                                    r_end_row,
+                                                            ):
+                                                                linked_tables.append(
+                                                                    table_dict["full_range"])
                                                     if linked_tables:
                                                         chart_dict["linked_table_ranges"] = linked_tables
                     finally:
-                        if processed_file_path_for_postprocessing and os.path.exists(processed_file_path_for_postprocessing):
+                        if processed_file_path_for_postprocessing and os.path.exists(
+                                processed_file_path_for_postprocessing
+                        ):
                             os.remove(processed_file_path_for_postprocessing)
-                        if 'temp_csv_conversion_dir' in locals() and temp_csv_conversion_dir and os.path.exists(temp_csv_conversion_dir):
+                        if (
+                            'temp_csv_conversion_dir' in locals()
+                            and temp_csv_conversion_dir
+                            and os.path.exists(temp_csv_conversion_dir)
+                        ):
                             os.rmdir(temp_csv_conversion_dir)
                 # If df is None (all decoding failed), json_data remains None, and this block is skipped.
                 # The existing error message for failed processing will be shown later if json_data is still None.
@@ -692,11 +777,12 @@ def main():
                 st.markdown(get_download_link(json_data), unsafe_allow_html=True)
             else:
                 st.error("Failed to process the spreadsheet and generate JSON data.")
-            
+
         except Exception as e:
             st.error(f"Error processing file: {e}")
             import traceback
             traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()

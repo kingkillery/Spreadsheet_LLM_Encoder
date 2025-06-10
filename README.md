@@ -130,3 +130,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+Before submitting, ensure that the code passes `flake8` checks:
+
+```bash
+pip install -r requirements-dev.txt
+flake8 .
+```
