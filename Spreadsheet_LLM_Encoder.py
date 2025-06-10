@@ -54,12 +54,12 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         # print memory usage
         logger.info(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
 
-        row_anchors, col_anchors = find_structural_anchors(sheet)
+        row_anchors, col_anchors = find_structural_anchors(sheet, k)
         logger.info(
             f"Found {len(row_anchors)} row anchors and {len(col_anchors)} column anchors"
         )
 
-        kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, k)
+        kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, 0)
         logger.info(
             f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns"
         )
@@ -95,48 +95,85 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
 
     return full_encoding
 
-def find_structural_anchors(sheet):
-    """Find structural anchors based on cell count and format changes."""
-    row_counts = [0] * (sheet.max_row + 1)
-    col_counts = [0] * (sheet.max_column + 1)
-    row_formats = [set() for _ in range(sheet.max_row + 1)]
-    col_formats = [set() for _ in range(sheet.max_column + 1)]
+def is_header_row(sheet, row_idx):
+    """Simple heuristics to detect header rows."""
+    num_populated = 0
+    num_bold = 0
+    num_all_caps = 0
+    num_strings = 0
 
-    for row in range(1, sheet.max_row + 1):
-        for col in range(1, sheet.max_column + 1):
-            cell = sheet.cell(row=row, column=col)
+    for c in range(1, sheet.max_column + 1):
+        cell = sheet.cell(row=row_idx, column=c)
+        if cell.value is None or str(cell.value).strip() == "":
+            continue
+        num_populated += 1
+        if cell.font and cell.font.bold:
+            num_bold += 1
+        if isinstance(cell.value, str):
+            num_strings += 1
+            if cell.value.isupper():
+                num_all_caps += 1
+
+    if num_populated == 0:
+        return False
+    if num_bold / num_populated > 0.5:
+        return True
+    if num_strings == num_populated and num_strings > 0 and num_all_caps / num_strings > 0.5:
+        return True
+    return False
+
+
+def find_boundary_candidates(sheet):
+    """Identify row/column boundary candidates using heterogeneity heuristics."""
+    row_types = []
+    col_types = []
+
+    for r in range(1, sheet.max_row + 1):
+        cell_types = []
+        for c in range(1, sheet.max_column + 1):
+            cell = sheet.cell(row=r, column=c)
             if cell.value is not None:
-                row_counts[row] += 1
-                col_counts[col] += 1
+                cell_types.append(infer_cell_data_type(cell))
+        row_types.append(set(cell_types))
 
-                # --- Format-based Anchors ---
-                format_key = get_cell_format_key(cell)
-                row_formats[row].add(format_key)
-                col_formats[col].add(format_key)
+    for c in range(1, sheet.max_column + 1):
+        cell_types = []
+        for r in range(1, sheet.max_row + 1):
+            cell = sheet.cell(row=r, column=c)
+            if cell.value is not None:
+                cell_types.append(infer_cell_data_type(cell))
+        col_types.append(set(cell_types))
 
-    row_anchors = []
-    for r in range(1, len(row_counts)):
-        if r == 1 and row_counts[r] > 0:
-            row_anchors.append(r)
-        elif r > 1 and r < len(row_counts) - 1:
-            # Check for significant changes in *both* count and format variety
-            if (abs(row_counts[r] - row_counts[r - 1]) > 2 or
-                abs(row_counts[r] - row_counts[r + 1]) > 2 or
-                len(row_formats[r]) != len(row_formats[r-1]) or
-                len(row_formats[r]) != len(row_formats[r+1])):
-                row_anchors.append(r)
+    row_candidates = set()
+    for r in range(1, len(row_types)):
+        if row_types[r] != row_types[r - 1]:
+            row_candidates.add(r)
 
-    col_anchors = []
-    for c in range(1, len(col_counts)):
-        if c == 1 and col_counts[c] > 0:
-            col_anchors.append(c)
-        elif c > 1 and c < len(col_counts) - 1:
-            if (abs(col_counts[c] - col_counts[c - 1]) > 2 or
-                abs(col_counts[c] - col_counts[c + 1]) > 2 or
-                len(col_formats[c]) != len(col_formats[c-1]) or
-                len(col_formats[c]) != len(col_formats[c+1])):
-                col_anchors.append(c)
+    col_candidates = set()
+    for c in range(1, len(col_types)):
+        if col_types[c] != col_types[c - 1]:
+            col_candidates.add(c)
 
+    header_rows = [idx for idx in range(1, sheet.max_row + 1) if is_header_row(sheet, idx)]
+    row_candidates = [r for r in row_candidates if r not in header_rows and (r - 1) not in header_rows]
+
+    return sorted(row_candidates), sorted(col_candidates)
+
+
+def extract_k_neighborhood(indices, k, max_index):
+    """Expand indices with a k-neighborhood within bounds."""
+    expanded = set()
+    for idx in indices:
+        for i in range(max(1, idx - k), min(max_index + 1, idx + k + 1)):
+            expanded.add(i)
+    return sorted(expanded)
+
+
+def find_structural_anchors(sheet, k=2):
+    """Find structural anchors using boundary candidates and k-neighborhood."""
+    row_candidates, col_candidates = find_boundary_candidates(sheet)
+    row_anchors = extract_k_neighborhood(row_candidates, k, sheet.max_row)
+    col_anchors = extract_k_neighborhood(col_candidates, k, sheet.max_column)
     return row_anchors, col_anchors
 
 def get_cell_format_key(cell):
