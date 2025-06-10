@@ -106,12 +106,12 @@ The encoder produces a JSON with this structure:
         "rows": [1, 5, 10],
         "columns": ["A", "C", "F"]
       },
-      "cells": {
+      "compressed_cells": {
         "Header": ["A1", "B1", "C1"],
         "42": ["B5"],
         "Total": ["A10"]
       },
-      "formats": {
+      "format_regions": {
         "{format_definition}": ["A1:C1", "A10:F10"]
       }
     }

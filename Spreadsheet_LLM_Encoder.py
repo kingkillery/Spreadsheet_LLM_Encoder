@@ -79,8 +79,8 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
                 "rows": row_anchors,
                 "columns": [get_column_letter(c) for c in col_anchors]
             },
-            "cells": inverted_index,
-            "formats": aggregated_formats
+            "compressed_cells": inverted_index,
+            "format_regions": aggregated_formats
         }
 
     full_encoding = {

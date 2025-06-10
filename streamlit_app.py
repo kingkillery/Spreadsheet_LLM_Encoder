@@ -347,8 +347,8 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
     """
     insights = {}
 
-    if "formats" in sheet_json_data and isinstance(sheet_json_data["formats"], dict):
-        format_keys_json_strings = list(sheet_json_data["formats"].keys())
+    if "format_regions" in sheet_json_data and isinstance(sheet_json_data["format_regions"], dict):
+        format_keys_json_strings = list(sheet_json_data["format_regions"].keys())
         num_unique_formats_overall = len(format_keys_json_strings)
         potential_redundancy_groups = []
         base_format_groups = {}
@@ -393,14 +393,14 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
             "potential_redundancy_groups": sorted(potential_redundancy_groups, key=lambda x: x["count_of_full_format_keys_in_group"], reverse=True)
         }
 
-    if "cells" in sheet_json_data and isinstance(sheet_json_data["cells"], dict):
-        value_counts = {value: len(refs) for value, refs in sheet_json_data["cells"].items()}
+    if "compressed_cells" in sheet_json_data and isinstance(sheet_json_data["compressed_cells"], dict):
+        value_counts = {value: len(refs) for value, refs in sheet_json_data["compressed_cells"].items()}
         sorted_values_by_freq = sorted(value_counts.items(), key=lambda item: (item[1], str(item[0])), reverse=True)
         insights["value_frequency"] = {
             "num_unique_values": len(sorted_values_by_freq),
             "top_10_frequent_values": sorted_values_by_freq[:10]
         }
-        total_cell_references = sum(len(refs) for refs in sheet_json_data["cells"].values())
+        total_cell_references = sum(len(refs) for refs in sheet_json_data["compressed_cells"].values())
         insights["total_cell_references_in_index"] = total_cell_references
 
     if "structural_anchors" in sheet_json_data and isinstance(sheet_json_data["structural_anchors"], dict):
@@ -424,11 +424,11 @@ def generate_common_value_map(sheet_json_data, top_n=5, min_len=4):
               identified common string values. Returns an empty dict if no suitable
               common strings are found.
     """
-    if "cells" not in sheet_json_data or not isinstance(sheet_json_data["cells"], dict):
+    if "compressed_cells" not in sheet_json_data or not isinstance(sheet_json_data["compressed_cells"], dict):
         return {}
 
     string_frequencies = {}
-    for value_str, refs in sheet_json_data["cells"].items():
+    for value_str, refs in sheet_json_data["compressed_cells"].items():
         if isinstance(value_str, str) and len(value_str) >= min_len:
             # Attempt to filter out strings that are purely numeric
             is_numeric_string = False
@@ -545,9 +545,9 @@ def main():
                                 if chart_list:
                                     sheet_data_node["charts"] = chart_list
 
-                                if "formats" in sheet_data_node:
+                                if "format_regions" in sheet_data_node:
                                     parsed_number_formats_map = {}
-                                    for fmt_key_json, _ in sheet_data_node["formats"].items():
+                                    for fmt_key_json, _ in sheet_data_node["format_regions"].items():
                                         try:
                                             fmt_details = json.loads(fmt_key_json)
                                             number_format_str = fmt_details.get("number_format")
@@ -644,9 +644,9 @@ def main():
                                     if chart_list:
                                         sheet_data_node["charts"] = chart_list
 
-                                    if "formats" in sheet_data_node:
+                                    if "format_regions" in sheet_data_node:
                                         parsed_number_formats_map = {}
-                                        for fmt_key_json, _ in sheet_data_node["formats"].items():
+                                        for fmt_key_json, _ in sheet_data_node["format_regions"].items():
                                             try:
                                                 fmt_details = json.loads(fmt_key_json)
                                                 number_format_str = fmt_details.get("number_format")
