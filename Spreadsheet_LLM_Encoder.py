@@ -397,17 +397,33 @@ def split_cell_ref(cell_ref):
     # convert row to integer
     return col_str, int(row_str)
 
-if __name__ == "__main__":
+def main():
+    """Console script entry point for SpreadsheetLLM encoder."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Convert Excel files to SpreadsheetLLM format')
-    parser.add_argument('excel_file', help='Path to the Excel file')
-    parser.add_argument('--output', '-o', help='Output JSON file path (default: same as input with .json extension)')
-    parser.add_argument('--k', type=int, default=2, help='Neighborhood distance parameter (default: 2)')
+    parser = argparse.ArgumentParser(
+        description="Convert Excel files to SpreadsheetLLM format"
+    )
+    parser.add_argument("excel_file", help="Path to the Excel file")
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Output JSON file path (default: same as input with .json extension)",
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=2,
+        help="Neighborhood distance parameter (default: 2)",
+    )
 
     args = parser.parse_args()
 
     if not args.output:
-        args.output = os.path.splitext(args.excel_file)[0] + '_spreadsheetllm.json'
+        args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
 
     spreadsheet_llm_encode(args.excel_file, args.output, args.k)
+
+
+if __name__ == "__main__":
+    main()
