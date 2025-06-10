@@ -3,7 +3,12 @@ import pandas as pd  # Used for some data manipulation
 import openpyxl
 import json
 import logging
-from temp_helpers import infer_cell_data_type, categorize_number_format
+from temp_helpers import (
+    infer_cell_data_type,
+    categorize_number_format,
+    get_number_format_string,
+    detect_semantic_type,
+)
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string
@@ -27,7 +32,8 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
-        workbook = openpyxl.load_workbook(excel_path, data_only=False) # Changed data_only to False
+        # openpyxl is used directly so number format strings are preserved
+        workbook = openpyxl.load_workbook(excel_path, data_only=False)
         logger.info(
             f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
         )
@@ -310,95 +316,67 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
     return dict(inverted_index), dict(format_map)
 
 def aggregate_formats(sheet, format_map):
-    """Aggregate cells with the same format into rectangular regions."""
+    """Aggregate cells with the same inferred type and number format string."""
     aggregated_formats = defaultdict(list)
     processed_cells = set()
 
-    for fmt, cells in format_map.items():
-        try:
-            format_data = json.loads(fmt)
-            # Handle merged cells first
-            if format_data.get('merged') is True and 'merged_range' in format_data:
-                aggregated_formats[fmt].append(format_data['merged_range'])
-                # Mark all cells in the merged range as processed
-                try:
-                    merged_range = format_data['merged_range']
-                    start_ref, end_ref = merged_range.split(':')
-                    start_col_letter, start_row = split_cell_ref(start_ref)
-                    end_col_letter, end_row = split_cell_ref(end_ref)
-                    
-                    start_col = openpyxl.utils.cell.column_index_from_string(start_col_letter)
-                    end_col = openpyxl.utils.cell.column_index_from_string(end_col_letter)
-                    
-                    for r in range(start_row, end_row + 1):
-                        for c in range(start_col, end_col + 1):
-                            cell_ref = f"{get_column_letter(c)}{r}"
-                            processed_cells.add(cell_ref)
-                except Exception as e:
-                    logger.warning(
-                        f"Error processing merged range {format_data['merged_range']}: {e}"
-                    )
-                
-                continue  # Skip to next format
+    type_nfs_map = defaultdict(list)
+    for _, cells in format_map.items():
+        for cell_ref in cells:
+            try:
+                cell = sheet[cell_ref]
+            except Exception:
+                continue
+            nfs = get_number_format_string(cell)
+            sem_type = detect_semantic_type(cell)
+            key = json.dumps({"type": sem_type, "nfs": nfs}, sort_keys=True)
+            type_nfs_map[key].append(cell_ref)
 
-            if len(cells) < 3:  # Skip very small format groups
+    for key, cells in type_nfs_map.items():
+        cells_set = set(cells)
+        for start_cell in cells:
+            if start_cell in processed_cells:
                 continue
 
-            cells_set = set(cells)  # for faster lookup
+            try:
+                start_col_letter, start_row = split_cell_ref(start_cell)
+                start_col = openpyxl.utils.cell.column_index_from_string(start_col_letter)
+            except Exception:
+                continue
 
-            for start_cell in cells:
-                if start_cell in processed_cells:
-                    continue
+            best_width = 1
+            best_height = 1
+            best_area = 1
+            best_end_cell = start_cell
 
-                # Parse starting cell
-                try:
-                    start_col_letter, start_row = split_cell_ref(start_cell)
-                    start_col = openpyxl.utils.cell.column_index_from_string(start_col_letter)
-                except Exception:
-                    continue  # Skip if cell reference can't be parsed
+            max_width = min(20, sheet.max_column - start_col + 1)
+            max_height = min(20, sheet.max_row - start_row + 1)
 
-                # Initialize best rectangle
-                best_width = 1
-                best_height = 1
-                best_area = 1
-                best_end_cell = start_cell
-
-                # Try expanding in all directions
-                max_width = min(20, sheet.max_column - start_col + 1)  # Limit search to reasonable size
-                max_height = min(20, sheet.max_row - start_row + 1)    # Limit search to reasonable size
-                
-                for width in range(1, max_width + 1):
-                    for height in range(1, max_height + 1):
-                        valid_rectangle = True
-                        for r in range(start_row, start_row + height):
-                            for c in range(start_col, start_col + width):
-                                cell_ref = f"{get_column_letter(c)}{r}"
-                                if cell_ref not in cells_set or cell_ref in processed_cells:
-                                    valid_rectangle = False
-                                    break
-                            if not valid_rectangle:
+            for width in range(1, max_width + 1):
+                for height in range(1, max_height + 1):
+                    valid_rectangle = True
+                    for r in range(start_row, start_row + height):
+                        for c in range(start_col, start_col + width):
+                            cell_ref = f"{get_column_letter(c)}{r}"
+                            if cell_ref not in cells_set or cell_ref in processed_cells:
+                                valid_rectangle = False
                                 break
+                        if not valid_rectangle:
+                            break
 
-                        if valid_rectangle:
-                            # Update best rectangle if this one is larger
-                            area = width * height
-                            if area > best_area:
-                                best_width = width
-                                best_height = height
-                                best_area = area
-                                best_end_cell = f"{get_column_letter(start_col + width - 1)}{start_row + height - 1}"
+                    if valid_rectangle:
+                        area = width * height
+                        if area > best_area:
+                            best_width = width
+                            best_height = height
+                            best_area = area
+                            best_end_cell = f"{get_column_letter(start_col + width - 1)}{start_row + height - 1}"
 
-                # Add the best rectangle found
-                if best_width > 1 or best_height > 1:
-                    region = f"{start_cell}:{best_end_cell}"
-                    aggregated_formats[fmt].append(region)
-
-                    # Mark cells as processed
-                    for r in range(start_row, start_row + best_height):
-                        for c in range(start_col, start_col + best_width):
-                            processed_cells.add(f"{get_column_letter(c)}{r}")
-        except Exception as e:
-            logger.warning(f"Error aggregating format {fmt}: {e}")
+            region = start_cell if best_width == 1 and best_height == 1 else f"{start_cell}:{best_end_cell}"
+            aggregated_formats[key].append(region)
+            for r in range(start_row, start_row + best_height):
+                for c in range(start_col, start_col + best_width):
+                    processed_cells.add(f"{get_column_letter(c)}{r}")
 
     return dict(aggregated_formats)
 

@@ -1,4 +1,5 @@
-import openpyxl # Required for type hinting Cell
+import openpyxl
+from openpyxl.cell.cell import Cell
 
 # --- Helper Functions for Format Information Extraction (Step 1) ---
 def infer_cell_data_type(cell: openpyxl.cell.cell.Cell) -> str:
@@ -123,3 +124,44 @@ def categorize_number_format(number_format_string: str, cell_data_type: str) -> 
         return "other_date" # It's a date type, but format is unusual (e.g. a custom number format applied to a date)
 
     return "unknown_format_category" # Default if no category fits
+
+# --- New Utilities for Number Format Strings (NFS) ---
+def get_number_format_string(cell: Cell) -> str:
+    """Return the raw number format string for a cell."""
+    try:
+        nfs = cell.number_format
+        if nfs is None or nfs == "":
+            return "General"
+        return str(nfs)
+    except Exception:
+        return "General"
+
+
+def detect_semantic_type(cell: Cell) -> str:
+    """Infer a higher level semantic type using number format information."""
+    data_type = infer_cell_data_type(cell)
+    nfs = get_number_format_string(cell)
+    category = categorize_number_format(nfs, data_type)
+    nfs_lower = nfs.lower()
+
+    if category == "percentage":
+        return "percentage"
+    if category == "currency":
+        return "currency"
+    if category in (
+        "date_long",
+        "date_short",
+        "other_date",
+        "datetime_custom",
+        "datetime_general",
+    ):
+        if ("yyyy" in nfs_lower or "yy" in nfs_lower) and not any(
+            x in nfs_lower for x in ["m", "d"]
+        ):
+            return "year"
+        return "date"
+    if category == "time_custom":
+        return "time"
+    if data_type == "numeric":
+        return "numeric"
+    return data_type

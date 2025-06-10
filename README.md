@@ -82,7 +82,11 @@ Instead of storing each cell individually, the encoder creates an inverted index
 
 ### 4. Format Region Aggregation
 
-Cell formats are aggregated into rectangular regions where possible, maintaining visual formatting information while minimizing duplication.
+Cell formats are aggregated into rectangular regions. During this step the encoder
+infers a semantic type (e.g. year, percentage, date) from each cell's number format
+string and groups contiguous cells that share both the type and the raw format
+string. This greatly reduces repeated style data in the output and improves
+compression.
 
 ### 5. JSON Encoding
 
