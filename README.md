@@ -45,6 +45,8 @@ Parameters:
 - `--output`, `-o`: Path to save the JSON output (optional, defaults to input filename with '_spreadsheetllm.json' suffix)
 - `--k`: Neighborhood distance parameter for structural anchors (optional, default=2)
 
+The CLI prints compression ratios for each sheet and overall. These metrics are also stored in the output JSON under `compression_metrics`.
+
 ### Python API
 
 ```python
@@ -114,6 +116,26 @@ The encoder produces a JSON with this structure:
       "formats": {
         "{format_definition}": ["A1:C1", "A10:F10"]
       }
+    }
+  }
+}
+```
+
+### Compression Metrics
+
+The encoder reports token counts before and after each stage. These values are stored under `compression_metrics` in the JSON output. Example:
+
+```json
+"compression_metrics": {
+  "overall": {
+    "overall_ratio": 3.5
+  },
+  "sheets": {
+    "Sheet1": {
+      "anchor_ratio": 2.1,
+      "inverted_index_ratio": 3.0,
+      "format_ratio": 3.4,
+      "overall_ratio": 3.5
     }
   }
 }

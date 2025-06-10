@@ -12,6 +12,15 @@ import sys
 
 logger = logging.getLogger(__name__)
 
+
+def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) -> float:
+    """Return the compression ratio given original and compressed token counts."""
+    if compressed_tokens == 0:
+        return 0.0
+    if original_tokens == 0:
+        return 1.0
+    return original_tokens / compressed_tokens
+
 def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     """
     Convert an Excel file to SpreadsheetLLM format, handling multiple sheets and detailed formats.
@@ -39,6 +48,8 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         return None
 
     sheets_encoding = {}
+    compression_metrics = {"sheets": {}}
+    overall_orig = overall_anchor = overall_index = overall_format = overall_final = 0
 
     for sheet_name in workbook.sheetnames:
         logger.info(f"\nProcessing sheet: {sheet_name}")
@@ -54,27 +65,46 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         # print memory usage
         logger.info(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
 
+        # --- gather original tokens before any compression ---
+        original_cells = {}
+        for r in range(1, sheet.max_row + 1):
+            for c in range(1, sheet.max_column + 1):
+                cell_value = sheet.cell(row=r, column=c).value
+                if cell_value is not None:
+                    original_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
+        original_tokens = len(json.dumps(original_cells, ensure_ascii=False))
+
         row_anchors, col_anchors = find_structural_anchors(sheet)
         logger.info(
             f"Found {len(row_anchors)} row anchors and {len(col_anchors)} column anchors"
         )
 
         kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, k)
+
+        anchor_cells = {}
+        for r in kept_rows:
+            for c in kept_cols:
+                cell_value = sheet.cell(row=r, column=c).value
+                if cell_value is not None:
+                    anchor_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
+        anchor_tokens = len(json.dumps(anchor_cells, ensure_ascii=False))
         logger.info(
             f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns"
         )
 
         inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
+        index_tokens = len(json.dumps(inverted_index, ensure_ascii=False))
         logger.info(
             f"Created inverted index with {len(inverted_index)} unique values"
         )
 
         aggregated_formats = aggregate_formats(sheet, format_map)
+        format_tokens = len(json.dumps(aggregated_formats, ensure_ascii=False))
         logger.info(
             f"Aggregated {len(aggregated_formats)} format regions"
         )
 
-        sheets_encoding[sheet_name] = {
+        sheet_encoding = {
             "structural_anchors": {
                 "rows": row_anchors,
                 "columns": [get_column_letter(c) for c in col_anchors]
@@ -83,9 +113,59 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
             "formats": aggregated_formats
         }
 
+        final_tokens = len(json.dumps(sheet_encoding, ensure_ascii=False))
+
+        ratio_anchor = calculate_compression_ratio(original_tokens, anchor_tokens)
+        ratio_index = calculate_compression_ratio(original_tokens, index_tokens)
+        ratio_format = calculate_compression_ratio(original_tokens, format_tokens)
+        ratio_final = calculate_compression_ratio(original_tokens, final_tokens)
+
+        compression_metrics["sheets"][sheet_name] = {
+            "original_tokens": original_tokens,
+            "after_anchor_tokens": anchor_tokens,
+            "after_inverted_index_tokens": index_tokens,
+            "after_format_tokens": format_tokens,
+            "final_tokens": final_tokens,
+            "anchor_ratio": ratio_anchor,
+            "inverted_index_ratio": ratio_index,
+            "format_ratio": ratio_format,
+            "overall_ratio": ratio_final,
+        }
+
+        logger.info(
+            f"{sheet_name} compression - Anchors: {ratio_anchor:.2f}x, "
+            f"Index: {ratio_index:.2f}x, Formats: {ratio_format:.2f}x, "
+            f"Overall: {ratio_final:.2f}x"
+        )
+
+        sheets_encoding[sheet_name] = sheet_encoding
+
+        overall_orig += original_tokens
+        overall_anchor += anchor_tokens
+        overall_index += index_tokens
+        overall_format += format_tokens
+        overall_final += final_tokens
+
+    compression_metrics["overall"] = {
+        "original_tokens": overall_orig,
+        "after_anchor_tokens": overall_anchor,
+        "after_inverted_index_tokens": overall_index,
+        "after_format_tokens": overall_format,
+        "final_tokens": overall_final,
+        "anchor_ratio": calculate_compression_ratio(overall_orig, overall_anchor),
+        "inverted_index_ratio": calculate_compression_ratio(overall_orig, overall_index),
+        "format_ratio": calculate_compression_ratio(overall_orig, overall_format),
+        "overall_ratio": calculate_compression_ratio(overall_orig, overall_final),
+    }
+
+    logger.info(
+        f"Overall compression: {compression_metrics['overall']['overall_ratio']:.2f}x"
+    )
+
     full_encoding = {
         "file_name": os.path.basename(excel_path),
-        "sheets": sheets_encoding
+        "sheets": sheets_encoding,
+        "compression_metrics": compression_metrics,
     }
 
     if output_path:
