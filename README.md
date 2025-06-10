@@ -80,7 +80,7 @@ The SpreadsheetLLM encoder works through several key steps:
 
 ### 1. Structural Anchor Detection
 
-The encoder identifies key structural points in the spreadsheet (rows and columns) that define the layout, based on:
+The encoder identifies key structural points in the spreadsheet (rows and columns) that define the layout. Boundary candidates are generated where cell type patterns change markedly, then filtered if they overlap with detected header rows. Anchors are thus based on:
 - Cell density changes
 - Format transitions
 - Content type boundaries
