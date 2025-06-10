@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     """
     Convert an Excel file to SpreadsheetLLM format, handling multiple sheets and detailed formats.
+    Identical cell values are merged into address ranges for a compact inverted index.
 
     Args:
         excel_path (str): Path to the Excel file.
@@ -69,6 +70,11 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
             f"Created inverted index with {len(inverted_index)} unique values"
         )
 
+        merged_index = create_inverted_index_translation(inverted_index)
+        logger.info(
+            f"Merged values into {len(merged_index)} range groups"
+        )
+
         aggregated_formats = aggregate_formats(sheet, format_map)
         logger.info(
             f"Aggregated {len(aggregated_formats)} format regions"
@@ -79,7 +85,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
                 "rows": row_anchors,
                 "columns": [get_column_letter(c) for c in col_anchors]
             },
-            "cells": inverted_index,
+            "cells": merged_index,
             "formats": aggregated_formats
         }
 
@@ -401,6 +407,73 @@ def aggregate_formats(sheet, format_map):
             logger.warning(f"Error aggregating format {fmt}: {e}")
 
     return dict(aggregated_formats)
+
+def create_inverted_index_translation(inverted_index):
+    """Merge cell references for identical values into ranges.
+
+    Args:
+        inverted_index (dict): Mapping of values to lists of cell references.
+
+    Returns:
+        dict: Mapping of values to merged cell ranges.
+    """
+
+    def _merge_refs(refs):
+        coords = []
+        for ref in sorted(set(refs)):
+            try:
+                col_letter, row = split_cell_ref(ref)
+                col = openpyxl.utils.cell.column_index_from_string(col_letter)
+                coords.append((row, col))
+            except Exception:
+                continue
+
+        cell_set = set(coords)
+        processed = set()
+        ranges = []
+
+        for row, col in sorted(coords):
+            if (row, col) in processed:
+                continue
+
+            width = 1
+            while (row, col + width) in cell_set and (row, col + width) not in processed:
+                width += 1
+
+            height = 1
+            expanding = True
+            while expanding:
+                next_row = row + height
+                for w in range(width):
+                    if (next_row, col + w) not in cell_set or (next_row, col + w) in processed:
+                        expanding = False
+                        break
+                if expanding:
+                    height += 1
+
+            end_col = col + width - 1
+            end_row = row + height - 1
+            start_ref = f"{get_column_letter(col)}{row}"
+            end_ref = f"{get_column_letter(end_col)}{end_row}"
+
+            if width == 1 and height == 1:
+                ranges.append(start_ref)
+            else:
+                ranges.append(f"{start_ref}:{end_ref}")
+
+            for r in range(row, row + height):
+                for c in range(col, col + width):
+                    processed.add((r, c))
+
+        return ranges
+
+    merged_index = {}
+    for value, refs in inverted_index.items():
+        if value is None or str(value).strip() == "":
+            continue
+        merged_index[value] = _merge_refs(refs)
+
+    return merged_index
 
 def get_column_index(col_letter):
     """Convert column letter to index (A => 1, AA => 27)."""

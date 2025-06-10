@@ -78,7 +78,7 @@ Using the identified anchors, the encoder extracts cells within a configurable d
 
 ### 3. Inverted Index Creation
 
-Instead of storing each cell individually, the encoder creates an inverted index mapping content values to cell references. This significantly reduces redundancy and creates a more compact representation.
+Instead of storing each cell individually, the encoder creates an inverted index mapping content values to cell references. Identical values are merged into contiguous address ranges and empty cells are omitted, resulting in a compact representation.
 
 ### 4. Format Region Aggregation
 
@@ -90,7 +90,7 @@ The final output is a structured JSON document containing:
 - File metadata
 - Sheet information
 - Structural anchors
-- Cell values (inverted index)
+- Cell values (inverted index with merged ranges)
 - Format regions
 
 ## Output Format
@@ -107,7 +107,7 @@ The encoder produces a JSON with this structure:
         "columns": ["A", "C", "F"]
       },
       "cells": {
-        "Header": ["A1", "B1", "C1"],
+        "Header": ["A1:C1"],
         "42": ["B5"],
         "Total": ["A10"]
       },
