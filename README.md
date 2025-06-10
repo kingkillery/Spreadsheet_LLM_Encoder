@@ -61,6 +61,19 @@ encoding = spreadsheet_llm_encode(
 )
 ```
 
+
+## Chain-of-Spreadsheet Pipeline
+
+The module `chain_of_spreadsheet.py` implements a simple two-stage flow:
+1. **Table selection** with `identify_table` uses your query to choose the most relevant sheet from the compressed encoding.
+2. **Response generation** with `generate_response` reuses your query along with the selected sheet data to produce a textual answer.
+
+The helper script `example_chain_usage.py` shows how to run this pipeline:
+
+```bash
+python example_chain_usage.py workbook.xlsx "What were the totals?"
+```
+
 ## How It Works
 
 The SpreadsheetLLM encoder works through several key steps:
