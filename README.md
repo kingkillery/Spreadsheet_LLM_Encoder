@@ -119,6 +119,15 @@ The encoder produces a JSON with this structure:
 }
 ```
 
+## Evaluation
+
+Utilities for evaluating table detection are included:
+
+- `evaluation.py` implements the Error-of-Boundary (EoB-0) metric and provides
+  a loader for the Dong et al. (2019) dataset.
+- `run_evaluation.py` executes TableSense-CNN on this dataset and prints the
+  resulting F1 score and basic compression statistics.
+
 ## Research Background
 
 This implementation is based on the paper "[SpreadsheetLLM: Enabling LLMs to Understand Spreadsheets](https://www.microsoft.com/en-us/research/)" published by Microsoft Research in July 2024. The paper introduces a novel approach to encode spreadsheets for LLM comprehension that preserves structural integrity and visual semantics.
