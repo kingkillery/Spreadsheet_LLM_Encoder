@@ -2,12 +2,15 @@ import os
 import pandas as pd  # Used for some data manipulation
 import openpyxl
 import json
+import logging
 from temp_helpers import infer_cell_data_type, categorize_number_format
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string
 from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
 import sys
+
+logger = logging.getLogger(__name__)
 
 def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     """
@@ -21,43 +24,55 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
     """
-    print(f"Processing Excel file: {excel_path}")
+    logger.info(f"Processing Excel file: {excel_path}")
 
     try:
         workbook = openpyxl.load_workbook(excel_path, data_only=False) # Changed data_only to False
-        print(f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}")
+        logger.info(
+            f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
+        )
     except FileNotFoundError:
-        print(f"Error: File not found: {excel_path}")
+        logger.warning(f"Error: File not found: {excel_path}")
         return None
     except Exception as e:
-        print(f"Error loading Excel file: {e}")
+        logger.warning(f"Error loading Excel file: {e}")
         return None
 
     sheets_encoding = {}
 
     for sheet_name in workbook.sheetnames:
-        print(f"\nProcessing sheet: {sheet_name}")
+        logger.info(f"\nProcessing sheet: {sheet_name}")
         sheet = workbook[sheet_name]
 
         if sheet.max_row <= 1 and sheet.max_column <= 1:
-            print(f"Sheet '{sheet_name}' appears to be empty. Skipping.")
+            logger.info(f"Sheet '{sheet_name}' appears to be empty. Skipping.")
             continue
 
-        print(f"Sheet dimensions: {sheet.max_row} rows × {sheet.max_column} columns")
+        logger.info(
+            f"Sheet dimensions: {sheet.max_row} rows × {sheet.max_column} columns"
+        )
         # print memory usage
-        print(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
+        logger.info(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
 
         row_anchors, col_anchors = find_structural_anchors(sheet)
-        print(f"Found {len(row_anchors)} row anchors and {len(col_anchors)} column anchors")
+        logger.info(
+            f"Found {len(row_anchors)} row anchors and {len(col_anchors)} column anchors"
+        )
 
         kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, k)
-        print(f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns")
+        logger.info(
+            f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns"
+        )
 
         inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
-        print(f"Created inverted index with {len(inverted_index)} unique values")
+        logger.info(
+            f"Created inverted index with {len(inverted_index)} unique values"
+        )
 
         aggregated_formats = aggregate_formats(sheet, format_map)
-        print(f"Aggregated {len(aggregated_formats)} format regions")
+        logger.info(
+            f"Aggregated {len(aggregated_formats)} format regions"
+        )
 
         sheets_encoding[sheet_name] = {
             "structural_anchors": {
@@ -76,7 +91,7 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(full_encoding, f, indent=2, ensure_ascii=False)
-        print(f"\nSaved SpreadsheetLLM encoding to {output_path}")
+        logger.info(f"Saved SpreadsheetLLM encoding to {output_path}")
 
     return full_encoding
 
@@ -228,7 +243,7 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                     inverted_index[cell_value].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell values
-                print(f"Warning: Error processing cell {cell_ref}: {e}")
+                logger.warning(f"Error processing cell {cell_ref}: {e}")
                 cell_value = "ERROR_VALUE"
                 inverted_index[cell_value].append(cell_ref)
 
@@ -290,7 +305,7 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                 format_map[format_key].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell formats
-                print(f"Warning: Error processing format for cell {cell_ref}: {e}")
+                logger.warning(f"Error processing format for cell {cell_ref}: {e}")
 
     return dict(inverted_index), dict(format_map)
 
@@ -320,7 +335,9 @@ def aggregate_formats(sheet, format_map):
                             cell_ref = f"{get_column_letter(c)}{r}"
                             processed_cells.add(cell_ref)
                 except Exception as e:
-                    print(f"Warning: Error processing merged range {format_data['merged_range']}: {e}")
+                    logger.warning(
+                        f"Error processing merged range {format_data['merged_range']}: {e}"
+                    )
                 
                 continue  # Skip to next format
 
@@ -381,7 +398,7 @@ def aggregate_formats(sheet, format_map):
                         for c in range(start_col, start_col + best_width):
                             processed_cells.add(f"{get_column_letter(c)}{r}")
         except Exception as e:
-            print(f"Warning: Error aggregating format {fmt}: {e}")
+            logger.warning(f"Error aggregating format {fmt}: {e}")
 
     return dict(aggregated_formats)
 
@@ -398,6 +415,7 @@ def split_cell_ref(cell_ref):
     return col_str, int(row_str)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     import argparse
 
     parser = argparse.ArgumentParser(description='Convert Excel files to SpreadsheetLLM format')

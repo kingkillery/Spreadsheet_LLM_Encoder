@@ -2,10 +2,14 @@ import streamlit as st
 import pandas as pd
 import json
 import base64
+import logging
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 import openpyxl
 import tempfile
 import os
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string # For parsing cell/range refs
 import re # For parsing number format strings
@@ -369,7 +373,9 @@ def analyze_sheet_for_compression_insights(sheet_json_data):
                     base_format_groups[base_format_key_tuple] = []
                 base_format_groups[base_format_key_tuple].append(fmt_details.get("number_format", "General"))
             except json.JSONDecodeError:
-                print(f"Warning (compression_insights): Malformed format key string found: {fmt_key_str}")
+                logger.warning(
+                    f"Warning (compression_insights): Malformed format key string found: {fmt_key_str}"
+                )
                 continue
 
         for base_fmt_tuple, number_format_list in base_format_groups.items():
