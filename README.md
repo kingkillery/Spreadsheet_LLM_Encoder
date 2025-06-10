@@ -84,7 +84,11 @@ Instead of storing each cell individually, the encoder creates an inverted index
 
 Cell formats are aggregated into rectangular regions where possible, maintaining visual formatting information while minimizing duplication.
 
-### 5. JSON Encoding
+### 5. Compression
+
+Heterogeneous rows and columns around anchors are retained while uniform regions are skipped. Numeric cells with identical formatting are clustered into aggregated ranges.
+
+### 6. JSON Encoding
 
 The final output is a structured JSON document containing:
 - File metadata
@@ -92,6 +96,7 @@ The final output is a structured JSON document containing:
 - Structural anchors
 - Cell values (inverted index)
 - Format regions
+- Numeric ranges
 
 ## Output Format
 
@@ -113,6 +118,9 @@ The encoder produces a JSON with this structure:
       },
       "formats": {
         "{format_definition}": ["A1:C1", "A10:F10"]
+      },
+      "numeric_ranges": {
+        "{format_definition}": ["B2:B8"]
       }
     }
   }

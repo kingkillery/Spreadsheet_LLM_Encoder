@@ -53,11 +53,18 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, k)
         print(f"Keeping {len(kept_rows)} rows and {len(kept_cols)} columns")
 
+        # Compress homogeneous regions before indexing
+        kept_rows, kept_cols = compress_homogeneous_regions(sheet, kept_rows, kept_cols)
+        print(f"After compression: {len(kept_rows)} rows and {len(kept_cols)} columns kept")
+
         inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
         print(f"Created inverted index with {len(inverted_index)} unique values")
 
         aggregated_formats = aggregate_formats(sheet, format_map)
         print(f"Aggregated {len(aggregated_formats)} format regions")
+
+        numeric_ranges = cluster_numeric_ranges(sheet, format_map)
+        print(f"Clustered {len(numeric_ranges)} numeric format ranges")
 
         sheets_encoding[sheet_name] = {
             "structural_anchors": {
@@ -65,7 +72,8 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
                 "columns": [get_column_letter(c) for c in col_anchors]
             },
             "cells": inverted_index,
-            "formats": aggregated_formats
+            "formats": aggregated_formats,
+            "numeric_ranges": numeric_ranges
         }
 
     full_encoding = {
@@ -191,6 +199,30 @@ def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
             cols_to_keep.add(i)
 
     return sorted(list(rows_to_keep)), sorted(list(cols_to_keep))
+
+def compress_homogeneous_regions(sheet, rows, cols):
+    """Remove rows and columns that are homogeneous in value and format."""
+    def row_homogeneous(r):
+        vals = []
+        fmts = []
+        for c in cols:
+            cell = sheet.cell(row=r, column=c)
+            vals.append(cell.value)
+            fmts.append(cell.number_format)
+        return len(set(vals)) <= 1 and len(set(fmts)) <= 1
+
+    def col_homogeneous(c):
+        vals = []
+        fmts = []
+        for r in rows:
+            cell = sheet.cell(row=r, column=c)
+            vals.append(cell.value)
+            fmts.append(cell.number_format)
+        return len(set(vals)) <= 1 and len(set(fmts)) <= 1
+
+    filtered_rows = [r for r in rows if not row_homogeneous(r)]
+    filtered_cols = [c for c in cols if not col_homogeneous(c)]
+    return filtered_rows, filtered_cols
 
 def create_inverted_index(sheet, kept_rows, kept_cols):
     """Create an inverted index, handling merged cells."""
@@ -384,6 +416,14 @@ def aggregate_formats(sheet, format_map):
             print(f"Warning: Error aggregating format {fmt}: {e}")
 
     return dict(aggregated_formats)
+
+def cluster_numeric_ranges(sheet, format_map):
+    """Aggregate numeric cells with identical formatting into ranges."""
+    numeric_map = {
+        fmt: cells for fmt, cells in format_map.items()
+        if json.loads(fmt).get("inferred_data_type") == "numeric"
+    }
+    return aggregate_formats(sheet, numeric_map)
 
 def get_column_index(col_letter):
     """Convert column letter to index (A => 1, AA => 27)."""
