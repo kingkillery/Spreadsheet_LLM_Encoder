@@ -1,5 +1,4 @@
 import os
-import pandas as pd  # Used for some data manipulation
 import openpyxl
 import json
 import logging
@@ -11,8 +10,7 @@ from temp_helpers import (
 )
 from collections import defaultdict
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_from_string
-from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
+
 import sys
 
 logger = logging.getLogger(__name__)
@@ -303,14 +301,20 @@ def get_cell_format_key(cell):
         format_info["border"] = {
             side: {
                 "style": getattr(border, side).style,
-                "color": str(getattr(border, side).color.rgb) if getattr(border, side).color and getattr(border, side).color.rgb else None,
-            } for side in ["left", "right", "top", "bottom"]
+                "color": (
+                    str(getattr(border, side).color.rgb)
+                    if getattr(border, side).color and getattr(border, side).color.rgb
+                    else None
+                ),
+            }
+            for side in ["left", "right", "top", "bottom"]
         }
 
         # 4. Fill (Background Color)
         fill = cell.fill
         if hasattr(fill, 'patternType') and fill.patternType == "solid":
-            format_info["fill"] = {"color": str(fill.start_color.index) if fill.start_color and fill.start_color.index else None}
+            format_info["fill"] = {"color": str(fill.start_color.index)
+                                   if fill.start_color and fill.start_color.index else None}
         else:
             format_info["fill"] = {"color": None}
 
@@ -437,14 +441,20 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
                 format_info["border"] = {
                     side: {
                         "style": getattr(border, side).style,
-                        "color": str(getattr(border, side).color.rgb) if getattr(border, side).color and getattr(border, side).color.rgb else None,
-                    } for side in ["left", "right", "top", "bottom"]
+                        "color": (
+                            str(getattr(border, side).color.rgb)
+                            if getattr(border, side).color and getattr(border, side).color.rgb
+                            else None
+                        ),
+                    }
+                    for side in ["left", "right", "top", "bottom"]
                 }
 
                 # 4. Fill (Background Color)
                 fill = cell.fill
                 if hasattr(fill, 'patternType') and fill.patternType == "solid":
-                    format_info["fill"] = {"color": str(fill.start_color.index) if fill.start_color and fill.start_color.index else None}
+                    format_info["fill"] = {"color": str(fill.start_color.index)
+                                           if fill.start_color and fill.start_color.index else None}
                 else:
                     format_info["fill"] = {"color": None}
 

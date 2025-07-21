@@ -1,6 +1,6 @@
 """Simple two stage pipeline for SpreadsheetLLM encoded files."""
-import json
 from typing import Dict, Optional
+
 
 def identify_table(encoding: Dict, query: str) -> Optional[str]:
     """Return the sheet name most relevant to the query.
@@ -33,6 +33,7 @@ def identify_table(encoding: Dict, query: str) -> Optional[str]:
             best_sheet = sheet_name
     return best_sheet
 
+
 def generate_response(sheet_data: Dict, query: str) -> str:
     """Generate a text answer using the selected sheet.
 
@@ -52,4 +53,3 @@ def generate_response(sheet_data: Dict, query: str) -> str:
     for val, refs in matches.items():
         lines.append(f"  Value '{val}' at {', '.join(refs)}")
     return "\n".join(lines)
-

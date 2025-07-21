@@ -3,6 +3,7 @@ import sys
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 from chain_of_spreadsheet import identify_table, generate_response
 
+
 def main():
     if len(sys.argv) < 3:
         print("Usage: python example_chain_usage.py <excel_path> <query>")

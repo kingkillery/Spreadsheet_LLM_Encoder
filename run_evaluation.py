@@ -1,7 +1,6 @@
 import argparse
 import json
 import logging
-import os
 
 from evaluation import load_dong2019_dataset, evaluate_detections
 

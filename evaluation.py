@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 from typing import List, Dict, Tuple
 import xml.etree.ElementTree as ET
@@ -7,6 +6,7 @@ import xml.etree.ElementTree as ET
 logger = logging.getLogger(__name__)
 
 BBox = Tuple[int, int, int, int]
+
 
 def load_dong2019_dataset(path: str) -> List[Dict[str, object]]:
     """Load the Dong et al. (2019) table detection dataset.
@@ -39,6 +39,7 @@ def load_dong2019_dataset(path: str) -> List[Dict[str, object]]:
         dataset.append({"image_path": img_path, "bboxes": bboxes, "ann_path": ann_path})
     return dataset
 
+
 def eob(pred: BBox, gt: BBox) -> float:
     """Compute the Error-of-Boundary metric for a bounding box pair."""
     px0, py0, px1, py1 = pred
@@ -55,7 +56,12 @@ def eob(pred: BBox, gt: BBox) -> float:
         abs(py1 - gy1) / height
     )
 
-def evaluate_detections(pred_boxes: List[BBox], gt_boxes: List[BBox], threshold: float = 0.0) -> Tuple[float, float, float]:
+
+def evaluate_detections(
+    pred_boxes: List[BBox],
+    gt_boxes: List[BBox],
+    threshold: float = 0.0,
+) -> Tuple[float, float, float]:
     """Evaluate predicted boxes against ground truth using EoB threshold."""
     matches = 0
     used = set()
@@ -71,6 +77,7 @@ def evaluate_detections(pred_boxes: List[BBox], gt_boxes: List[BBox], threshold:
     recall = matches / len(gt_boxes) if gt_boxes else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
     return precision, recall, f1
+
 
 __all__ = [
     "load_dong2019_dataset",
