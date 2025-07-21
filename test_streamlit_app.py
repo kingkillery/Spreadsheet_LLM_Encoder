@@ -1,9 +1,10 @@
+import os
 import pandas as pd
 import tempfile
-import os
-import pytest # Assuming pytest will be used to run tests
 
 # Helper function as defined in the streamlit_app.py logic (or a simplified version for testing)
+
+
 def read_csv_with_multiple_encodings(file_path):
     """
     Tries to read a CSV file using multiple encodings (utf-8, latin-1, iso-8859-1).
@@ -24,14 +25,16 @@ def read_csv_with_multiple_encodings(file_path):
                 df = pd.read_csv(file_path, encoding='iso-8859-1')
                 return df
             except Exception as e:
-                raise e # Raise the last exception (iso-8859-1 read error)
+                raise e  # Raise the last exception (iso-8859-1 read error)
         except Exception as e:
-            raise e # Raise the last exception (latin-1 read error)
+            raise e  # Raise the last exception (latin-1 read error)
     except Exception as e:
-        raise e # Raise the last exception (utf-8 read error)
+        raise e  # Raise the last exception (utf-8 read error)
+
 
 # Sample CSV data encoded in 'latin-1'
 sample_latin1_csv_data = "Name,City\nJules,Paris\nRené,Montréal\nBjörn,Göteborg".encode('latin-1')
+
 
 def test_csv_encoding_handling():
     """

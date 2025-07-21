@@ -2,6 +2,8 @@ import openpyxl
 from openpyxl.cell.cell import Cell
 
 # --- Helper Functions for Format Information Extraction (Step 1) ---
+
+
 def infer_cell_data_type(cell: openpyxl.cell.cell.Cell) -> str:
     """
     Infers the data type of a cell based on its openpyxl data_type and value.
@@ -10,18 +12,18 @@ def infer_cell_data_type(cell: openpyxl.cell.cell.Cell) -> str:
         return "empty"
 
     data_type = cell.data_type
-    if data_type == 's': # Standard string
+    if data_type == 's':  # Standard string
         return "text"
-    elif data_type == 'n': # Number
+    elif data_type == 'n':  # Number
         return "numeric"
-    elif data_type == 'b': # Boolean
+    elif data_type == 'b':  # Boolean
         return "boolean"
-    elif data_type == 'd': # Datetime
+    elif data_type == 'd':  # Datetime
         return "datetime"
-    elif data_type == 'e': # Error
+    elif data_type == 'e':  # Error
         return "error"
-    elif data_type == 'f': # Formula
-        if cell.value is not None: # openpyxl might store the last calculated value
+    elif data_type == 'f':  # Formula
+        if cell.value is not None:  # openpyxl might store the last calculated value
             if isinstance(cell.value, str):
                 return "text"
             elif isinstance(cell.value, (int, float)):
@@ -31,16 +33,17 @@ def infer_cell_data_type(cell: openpyxl.cell.cell.Cell) -> str:
             # Dates from formulas could be datetime objects (type 'd') or numbers formatted as dates (type 'n').
             # This function primarily uses cell.data_type, so 'd' is handled. 'n' will be "numeric".
             else:
-                return "formula_cached_value" # Other cached types
-        return "formula" # No cached value or type not easily inferred
-    elif data_type == 'g': # General (often for empty or untyped cells)
+                return "formula_cached_value"  # Other cached types
+        return "formula"  # No cached value or type not easily inferred
+    elif data_type == 'g':  # General (often for empty or untyped cells)
         # Already checked for cell.value is None. If 'g' and not None, treat as text.
         if cell.value is not None:
             return "text"
         else:
-            return "empty" # Fallback, though None check should catch this.
-    else: # Includes 'is' (inlineStr), 'str' (formula string, rare for type)
+            return "empty"  # Fallback, though None check should catch this.
+    else:  # Includes 'is' (inlineStr), 'str' (formula string, rare for type)
         return "unknown"
+
 
 def categorize_number_format(number_format_string: str, cell_data_type: str) -> str:
     """
@@ -53,7 +56,7 @@ def categorize_number_format(number_format_string: str, cell_data_type: str) -> 
         if cell_data_type == "datetime":
             # If openpyxl identified it as datetime but format is general, it's a date.
             return "datetime_general"
-        return "general" # General numeric
+        return "general"  # General numeric
 
     # Text format override (Format Code: @)
     if number_format_string == "@" or number_format_string.lower() == "text":
@@ -68,7 +71,7 @@ def categorize_number_format(number_format_string: str, cell_data_type: str) -> 
         return "percentage"
 
     # Scientific notation (e.g., 1.23E+05)
-    if 'E+' in number_format_string or 'E-' in number_format_string.upper(): # Openpyxl stores 'E+' or 'e+'
+    if 'E+' in number_format_string or 'E-' in number_format_string.upper():  # Openpyxl stores 'E+' or 'e+'
         return "scientific"
 
     # Fraction (e.g., # ?/?)
@@ -96,36 +99,37 @@ def categorize_number_format(number_format_string: str, cell_data_type: str) -> 
         # Avoid misclassifying "0.00" or "#,##0.00" if they contain ':' somehow (unlikely in valid formats)
         # A simple check: if there are digits around colons, it's more likely time.
         # More robustly, check if it's not purely a number format with colons.
-        temp_nf = number_format_string.replace('0','').replace('#','').replace(',','').replace('.','')
-        if ':' in temp_nf: # If colon persists after removing numeric placeholders
+        temp_nf = number_format_string.replace('0', '').replace('#', '').replace(',', '').replace('.', '')
+        if ':' in temp_nf:  # If colon persists after removing numeric placeholders
             is_time_format = True
 
-
     if is_date_format and is_time_format:
-        return "datetime_custom" # Contains both date and time elements
+        return "datetime_custom"  # Contains both date and time elements
     elif is_date_format:
         if 'yyyy' in nf_lower or 'mmmm' in nf_lower or 'dddd' in nf_lower:
-            return "date_long" # Longer date formats
+            return "date_long"  # Longer date formats
         elif 'yy' in nf_lower or 'mmm' in nf_lower or 'ddd' in nf_lower:
-            return "date_short" # Shorter date formats
-        return "other_date" # Other formats that look like dates
+            return "date_short"  # Shorter date formats
+        return "other_date"  # Other formats that look like dates
     elif is_time_format:
-        return "time_custom" # Formats that look like times
+        return "time_custom"  # Formats that look like times
 
     # Fallback for numeric types if no other category matched yet
     if cell_data_type == "numeric":
         # Check for common explicit numeric formats that aren't "General"
         if number_format_string in ["0", "#,##0", "0.00", "#,##0.00", "0.0", "#,##0.0"]:
             return "general_numeric_explicit"
-        return "other_numeric" # Numeric, but not currency, percentage, scientific, fraction, or common general.
+        return "other_numeric"  # Numeric, but not currency, percentage, scientific, fraction, or common general.
 
     # If cell_data_type was 'datetime' but format string didn't trigger specific date/time patterns
     if cell_data_type == "datetime":
-        return "other_date" # It's a date type, but format is unusual (e.g. a custom number format applied to a date)
+        return "other_date"  # It's a date type, but format is unusual (e.g. a custom number format applied to a date)
 
-    return "unknown_format_category" # Default if no category fits
+    return "unknown_format_category"  # Default if no category fits
 
 # --- New Utilities for Number Format Strings (NFS) ---
+
+
 def get_number_format_string(cell: Cell) -> str:
     """Return the raw number format string for a cell."""
     try:
