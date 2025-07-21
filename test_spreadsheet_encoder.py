@@ -24,7 +24,8 @@ def test_spreadsheet_llm_encode_structure():
         assert 'sheets' in encoding
         assert encoding['sheets'], 'No sheets found'
         sheet = next(iter(encoding['sheets'].values()))
-        assert 'compressed_cells' in sheet
-        assert 'format_regions' in sheet
+        # Updated keys in encoder output
+        assert 'cells' in sheet
+        assert 'formats' in sheet
     finally:
         os.remove(excel_path)

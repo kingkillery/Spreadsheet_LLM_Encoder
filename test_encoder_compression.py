@@ -32,9 +32,15 @@ def test_numeric_range_aggregation(tmp_path):
     file_path = tmp_path / "num.xlsx"
     create_workbook_numeric_region(str(file_path))
     result = spreadsheet_llm_encode(str(file_path))
-    ranges = result['sheets']['Sheet']['numeric_ranges']
-    any_large = any(any(':' in r and r != r.split(':')[0] for r in rs) for rs in ranges.values())
-    assert any_large, "Numeric ranges were not aggregated"
+    sheet = result['sheets']['Sheet']
+
+    # anchors should be empty for this simple numeric sheet
+    assert sheet['structural_anchors']['rows'] == []
+    assert sheet['structural_anchors']['columns'] == []
+
+    ranges = sheet['numeric_ranges']
+    # Expect one aggregated range covering the entire sheet
+    assert list(ranges.values()) == [['A1:D4']]
 
 
 def test_homogeneous_rows_skipped(tmp_path):

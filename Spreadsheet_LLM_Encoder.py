@@ -611,9 +611,30 @@ def aggregate_formats(sheet, format_map):
 def cluster_numeric_ranges(sheet, format_map):
     """Aggregate numeric cells with identical formatting into ranges."""
     numeric_map = {
-        fmt: cells for fmt, cells in format_map.items()
+        fmt: cells
+        for fmt, cells in format_map.items()
         if json.loads(fmt).get("inferred_data_type") == "numeric"
     }
+
+    if not numeric_map:
+        # Fall back to scanning the entire sheet when no anchors were
+        # retained and format_map is empty. This ensures numeric ranges are
+        # still detected for simple numeric sheets.
+        for r in range(1, sheet.max_row + 1):
+            for c in range(1, sheet.max_column + 1):
+                cell = sheet.cell(row=r, column=c)
+                if infer_cell_data_type(cell) == "numeric":
+                    fmt_key = json.dumps(
+                        {
+                            "type": detect_semantic_type(cell),
+                            "nfs": get_number_format_string(cell),
+                        },
+                        sort_keys=True,
+                    )
+                    numeric_map.setdefault(fmt_key, []).append(
+                        f"{get_column_letter(c)}{r}"
+                    )
+
     return aggregate_formats(sheet, numeric_map)
 
 
