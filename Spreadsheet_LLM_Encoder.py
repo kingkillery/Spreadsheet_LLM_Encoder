@@ -25,19 +25,22 @@ def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) ->
     return original_tokens / compressed_tokens
 
 
-def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
+def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
     """
-    Convert an Excel file to SpreadsheetLLM format, handling multiple sheets and detailed formats.
-    Identical cell values are merged into address ranges for a compact inverted index.
+    Convert an Excel file to SpreadsheetLLM format or a vanilla markdown-like format.
 
     Args:
         excel_path (str): Path to the Excel file.
-        output_path (str, optional): Path to save the JSON output. Defaults to None.
+        output_path (str, optional): Path to save the output. Defaults to None.
         k (int, optional): Neighborhood distance for structural anchors. Defaults to 2.
+        vanilla (bool, optional): If True, produce vanilla encoding instead of compressed.
+                                Defaults to False.
 
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
     """
+    if vanilla:
+        return vanilla_encode(excel_path, output_path)
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
@@ -110,13 +113,31 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
         )
         index_tokens = len(json.dumps(merged_index, ensure_ascii=False))
 
-        aggregated_formats = aggregate_formats(sheet, format_map)
+        # Create a map from a semantic key to cell references for aggregation
+        type_nfs_map = defaultdict(list)
+        for _, cells in format_map.items():
+            for cell_ref in cells:
+                try:
+                    cell = sheet[cell_ref]
+                except Exception:
+                    continue
+                nfs = get_number_format_string(cell)
+                sem_type = detect_semantic_type(cell)
+                key = json.dumps({"type": sem_type, "nfs": nfs}, sort_keys=True)
+                type_nfs_map[key].append(cell_ref)
+
+        aggregated_formats = aggregate_regions_dfs(sheet, type_nfs_map)
         logger.info(
             f"Aggregated {len(aggregated_formats)} format regions"
         )
         format_tokens = len(json.dumps(aggregated_formats, ensure_ascii=False))
 
-        numeric_ranges = cluster_numeric_ranges(sheet, format_map)
+        numeric_map = {
+            fmt: cells
+            for fmt, cells in type_nfs_map.items()
+            if json.loads(fmt).get("type") in ["numeric", "integer", "float"]
+        }
+        numeric_ranges = aggregate_regions_dfs(sheet, numeric_map)
         logger.info(f"Clustered {len(numeric_ranges)} numeric format ranges")
 
         sheet_encoding = {
@@ -192,69 +213,218 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2):
     return full_encoding
 
 
+def get_cell_style_key(cell):
+    """Creates a hashable key representing a cell's style for comparison."""
+    if not cell:
+        return "no_cell"
+
+    font = cell.font
+    border = cell.border
+    fill = cell.fill
+    alignment = cell.alignment
+
+    # Create a tuple of style attributes. Tuples are hashable.
+    style_tuple = (
+        (font.bold, font.italic, font.underline, font.sz, str(font.color.rgb if font.color else None)),
+        (border.left.style, border.right.style, border.top.style, border.bottom.style),
+        (fill.patternType, str(fill.fgColor.rgb if fill.fgColor else None)),
+        (alignment.horizontal, alignment.vertical, alignment.wrap_text)
+    )
+    return style_tuple
+
+
 def is_header_row(sheet, row_idx):
-    """Simple heuristics to detect header rows."""
+    """More robust heuristics to detect header rows, as per Appendix C."""
     num_populated = 0
     num_bold = 0
     num_all_caps = 0
     num_strings = 0
+    num_centered = 0
 
     for c in range(1, sheet.max_column + 1):
         cell = sheet.cell(row=row_idx, column=c)
         if cell.value is None or str(cell.value).strip() == "":
             continue
+
         num_populated += 1
         if cell.font and cell.font.bold:
             num_bold += 1
+        if cell.alignment and cell.alignment.horizontal == 'center':
+            num_centered += 1
+
         if isinstance(cell.value, str):
             num_strings += 1
-            if cell.value.isupper():
+            if cell.value.isupper() and len(cell.value) > 1:
                 num_all_caps += 1
 
     if num_populated == 0:
         return False
-    if num_bold / num_populated > 0.5:
+
+    # A high proportion of bolded, centered, or all-caps text cells are strong indicators.
+    if num_bold / num_populated > 0.6:
         return True
-    if num_strings == num_populated and num_strings > 0 and num_all_caps / num_strings > 0.5:
+    if num_centered / num_populated > 0.6:
         return True
+    if num_strings > 0 and num_all_caps / num_strings > 0.6:
+        return True
+
     return False
 
 
 def find_boundary_candidates(sheet):
-    """Identify row/column boundary candidates using heterogeneity heuristics."""
-    row_types = []
-    col_types = []
-
+    """
+    Identify row/column boundary candidates using enhanced heterogeneity heuristics
+    from Appendix C, including cell value, merged status, and style.
+    """
+    row_profiles = []
     for r in range(1, sheet.max_row + 1):
-        cell_types = []
+        profile = []
         for c in range(1, sheet.max_column + 1):
             cell = sheet.cell(row=r, column=c)
-            if cell.value is not None:
-                cell_types.append(infer_cell_data_type(cell))
-        row_types.append(set(cell_types))
+            is_merged = any(cell.coordinate in r_ for r_ in sheet.merged_cells.ranges)
+            style_key = get_cell_style_key(cell)
+            profile.append((cell.value, is_merged, style_key))
+        row_profiles.append(profile)
 
+    col_profiles = []
     for c in range(1, sheet.max_column + 1):
-        cell_types = []
+        profile = []
         for r in range(1, sheet.max_row + 1):
             cell = sheet.cell(row=r, column=c)
-            if cell.value is not None:
-                cell_types.append(infer_cell_data_type(cell))
-        col_types.append(set(cell_types))
+            is_merged = any(cell.coordinate in r_ for r_ in sheet.merged_cells.ranges)
+            style_key = get_cell_style_key(cell)
+            profile.append((cell.value, is_merged, style_key))
+        col_profiles.append(profile)
 
     row_candidates = set()
-    for r in range(1, len(row_types)):
-        if row_types[r] != row_types[r - 1]:
+    for r in range(1, len(row_profiles)):
+        if row_profiles[r] != row_profiles[r - 1]:
+            # Add both sides of the boundary
             row_candidates.add(r)
+            row_candidates.add(r + 1)
 
     col_candidates = set()
-    for c in range(1, len(col_types)):
-        if col_types[c] != col_types[c - 1]:
+    for c in range(1, len(col_profiles)):
+        if col_profiles[c] != col_profiles[c - 1]:
             col_candidates.add(c)
+            col_candidates.add(c + 1)
 
-    header_rows = [idx for idx in range(1, sheet.max_row + 1) if is_header_row(sheet, idx)]
-    row_candidates = [r for r in row_candidates if r not in header_rows and (r - 1) not in header_rows]
+    # Filter out candidates that are part of a detected header region
+    header_rows = {idx for idx in range(1, sheet.max_row + 1) if is_header_row(sheet, idx)}
+    row_candidates = {r for r in row_candidates if r not in header_rows}
 
-    return sorted(row_candidates), sorted(col_candidates)
+    # Step 2: Compose candidate boundaries
+    candidates = []
+    if row_candidates and col_candidates:
+        rows = sorted(list(row_candidates))
+        cols = sorted(list(col_candidates))
+        for i in range(len(rows)):
+            for j in range(i + 1, len(rows)):
+                for k in range(len(cols)):
+                    for l in range(k + 1, len(cols)):
+                        candidates.append((rows[i], cols[k], rows[j], cols[l]))
+
+    # Step 3: Filter unreasonable candidates
+    candidates = filter_unreasonable_candidates(sheet, candidates)
+
+    # Step 4: Filter overlapping candidates
+    candidates = filter_overlapping_candidates(sheet, candidates)
+
+    # Step 5: Derive anchors from final candidates
+    final_row_anchors = set()
+    final_col_anchors = set()
+    for r1, c1, r2, c2 in candidates:
+        final_row_anchors.add(r1)
+        final_row_anchors.add(r2)
+        final_col_anchors.add(c1)
+        final_col_anchors.add(c2)
+
+    return sorted(list(final_row_anchors)), sorted(list(final_col_anchors))
+
+
+def filter_unreasonable_candidates(sheet, candidates):
+    """Filter out candidates based on size, sparsity, and header presence."""
+    filtered = []
+    for r1, c1, r2, c2 in candidates:
+        # Size filter
+        if (r2 - r1 < 1) or (c2 - c1 < 1): continue # Must have at least 2 rows/cols
+
+        # Sparsity filter
+        num_cells = (r2 - r1 + 1) * (c2 - c1 + 1)
+        populated_cells = 0
+        for r in range(r1, r2 + 1):
+            for c in range(c1, c2 + 1):
+                if sheet.cell(row=r, column=c).value is not None:
+                    populated_cells += 1
+
+        if populated_cells / num_cells < 0.1: # At least 10% populated
+            continue
+
+        # Header presence filter (simple version)
+        has_header = any(is_header_row(sheet, r) for r in range(r1, r2 + 1))
+        if not has_header:
+            continue
+
+        filtered.append((r1, c1, r2, c2))
+
+    return filtered
+
+
+def calculate_iou(box1, box2):
+    """Calculate Intersection over Union (IoU) for two bounding boxes."""
+    r1_1, c1_1, r2_1, c2_1 = box1
+    r1_2, c1_2, r2_2, c2_2 = box2
+
+    inter_r1 = max(r1_1, r1_2)
+    inter_c1 = max(c1_1, c1_2)
+    inter_r2 = min(r2_1, r2_2)
+    inter_c2 = min(c2_1, c2_2)
+
+    inter_area = max(0, inter_r2 - inter_r1 + 1) * max(0, inter_c2 - inter_c1 + 1)
+
+    area1 = (r2_1 - r1_1 + 1) * (c2_1 - c1_1 + 1)
+    area2 = (r2_2 - r1_2 + 1) * (c2_2 - c1_2 + 1)
+
+    union_area = area1 + area2 - inter_area
+
+    return inter_area / union_area if union_area > 0 else 0
+
+
+def filter_overlapping_candidates(sheet, candidates):
+    """Filter overlapping candidates using heuristics from Appendix C."""
+    if not candidates:
+        return []
+
+    # Score candidates (higher is better)
+    scores = []
+    for r1, c1, r2, c2 in candidates:
+        score = 0
+        # Header score
+        for r in range(r1, min(r1 + 3, r2 + 1)): # Check top 3 rows for header
+            if is_header_row(sheet, r):
+                score += 10
+        # Area score
+        score += (r2 - r1 + 1) * (c2 - c1 + 1)
+        scores.append(score)
+
+    # Non-maximum suppression based on IoU and scores
+    indices = list(range(len(candidates)))
+    indices.sort(key=lambda i: scores[i], reverse=True)
+
+    keep = []
+    while indices:
+        current_idx = indices.pop(0)
+        keep.append(current_idx)
+
+        remaining_indices = []
+        for idx in indices:
+            iou = calculate_iou(candidates[current_idx], candidates[idx])
+            # If high overlap, discard the one with the lower score (which is the current `idx` because of sorting)
+            if iou < 0.5:
+                remaining_indices.append(idx)
+        indices = remaining_indices
+
+    return [candidates[i] for i in keep]
 
 
 def extract_k_neighborhood(indices, k, max_index):
@@ -460,13 +630,12 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
 
                 # 5. Number Format (Original, Inferred Type, Category)
                 original_number_format = cell.number_format
-                inferred_type = infer_cell_data_type(cell)  # Call new helper
-                category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
+                inferred_type = infer_cell_data_type(cell)
+                category = categorize_number_format(original_number_format, cell)
 
                 format_info["original_number_format"] = original_number_format
                 format_info["inferred_data_type"] = inferred_type
                 format_info["number_format_category"] = category
-                # format_info["number_format"] = cell.number_format # Redundant
 
                 # Store the format (handle merged ranges specially in format key)
                 if merged_range is not None:
@@ -682,13 +851,56 @@ def main():
         default=2,
         help="Neighborhood distance parameter (default: 2)",
     )
+    parser.add_argument(
+        "--vanilla",
+        action="store_true",
+        help="Produce vanilla markdown-like encoding instead of compressed JSON.",
+    )
 
     args = parser.parse_args()
 
     if not args.output:
-        args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
+        if args.vanilla:
+            args.output = os.path.splitext(args.excel_file)[0] + "_vanilla.txt"
+        else:
+            args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
 
-    spreadsheet_llm_encode(args.excel_file, args.output, args.k)
+    spreadsheet_llm_encode(args.excel_file, args.output, args.k, args.vanilla)
+
+
+def vanilla_encode(excel_path, output_path=None):
+    """
+    Produces a simple vanilla markdown-like encoding of a spreadsheet.
+    """
+    logger.info(f"Producing vanilla encoding for {excel_path}")
+    try:
+        workbook = openpyxl.load_workbook(excel_path, data_only=True)
+    except Exception as e:
+        logger.error(f"Error loading Excel file for vanilla encoding: {e}")
+        return None
+
+    vanilla_content = {}
+    for sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+        sheet_str = []
+        for r in range(1, sheet.max_row + 1):
+            row_str = []
+            for c in range(1, sheet.max_column + 1):
+                cell = sheet.cell(row=r, column=c)
+                cell_ref = f"{get_column_letter(c)}{r}"
+                cell_val = str(cell.value) if cell.value is not None else ""
+                row_str.append(f"{cell_ref},{cell_val}")
+            sheet_str.append("|".join(row_str))
+        vanilla_content[sheet_name] = "\n".join(sheet_str)
+
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            # For simplicity, we'll save the first sheet's content if there are multiple
+            first_sheet_name = next(iter(vanilla_content))
+            f.write(vanilla_content[first_sheet_name])
+        logger.info(f"Saved vanilla encoding to {output_path}")
+
+    return vanilla_content
 
 
 if __name__ == "__main__":
