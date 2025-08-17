@@ -1,11 +1,62 @@
 import os
+import json
 import logging
 from typing import List, Dict, Tuple
 import xml.etree.ElementTree as ET
+from openpyxl.utils import column_index_from_string, get_column_letter
+import re
 
 logger = logging.getLogger(__name__)
 
 BBox = Tuple[int, int, int, int]
+
+
+def range_to_bbox(range_str: str) -> BBox:
+    """Convert an Excel-style range (e.g., 'A1:F9') to a BBox tuple."""
+    parts = range_str.split(':')
+    start_cell = parts[0]
+    end_cell = parts[1] if len(parts) > 1 else start_cell
+
+    col_start_str = ''.join(filter(str.isalpha, start_cell))
+    row_start_str = ''.join(filter(str.isdigit, start_cell))
+
+    col_end_str = ''.join(filter(str.isalpha, end_cell))
+    row_end_str = ''.join(filter(str.isdigit, end_cell))
+
+    c1 = column_index_from_string(col_start_str)
+    r1 = int(row_start_str)
+    c2 = column_index_from_string(col_end_str)
+    r2 = int(row_end_str)
+
+    return (r1, c1, r2, c2)
+
+
+def load_spreadsheet_dataset(path: str) -> List[Dict[str, object]]:
+    """
+    Load a spreadsheet dataset with annotations in JSON format.
+    Expects pairs of .xlsx and .json files.
+    """
+    dataset = []
+    for fname in os.listdir(path):
+        if fname.endswith(".xlsx"):
+            spreadsheet_path = os.path.join(path, fname)
+            ann_path = os.path.join(path, fname.replace(".xlsx", ".json"))
+
+            if not os.path.exists(ann_path):
+                logger.warning(f"Annotation file not found for {fname}, skipping.")
+                continue
+
+            with open(ann_path, 'r') as f:
+                annotations = json.load(f)
+
+            bboxes = [range_to_bbox(t['range']) for t in annotations.get("tables", [])]
+
+            dataset.append({
+                "spreadsheet_path": spreadsheet_path,
+                "bboxes": bboxes,
+                "ann_path": ann_path
+            })
+    return dataset
 
 
 def load_dong2019_dataset(path: str) -> List[Dict[str, object]]:
@@ -79,8 +130,35 @@ def evaluate_detections(
     return precision, recall, f1
 
 
+def load_qa_dataset(path: str) -> List[Dict[str, object]]:
+    """
+    Load a spreadsheet QA dataset.
+    Expects pairs of .xlsx and .json files.
+    """
+    dataset = []
+    for fname in os.listdir(path):
+        if fname.endswith(".xlsx"):
+            spreadsheet_path = os.path.join(path, fname)
+            ann_path = os.path.join(path, fname.replace(".xlsx", ".json"))
+
+            if not os.path.exists(ann_path):
+                logger.warning(f"Annotation file not found for {fname}, skipping.")
+                continue
+
+            with open(ann_path, 'r') as f:
+                annotations = json.load(f)
+
+            qa_pairs = annotations.get("qa_pairs", [])
+            if qa_pairs:
+                dataset.append({
+                    "spreadsheet_path": spreadsheet_path,
+                    "qa_pairs": qa_pairs
+                })
+    return dataset
+
 __all__ = [
     "load_dong2019_dataset",
+    "load_qa_dataset",
     "eob",
     "evaluate_detections",
 ]

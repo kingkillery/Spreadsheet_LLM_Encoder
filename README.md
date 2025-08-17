@@ -71,60 +71,42 @@ encoding = spreadsheet_llm_encode(
 ```
 
 
-## Chain-of-Spreadsheet Pipeline
+## Chain-of-Spreadsheet (CoS) Pipeline
 
-The module `chain_of_spreadsheet.py` implements a simple two-stage flow:
-1. **Table selection** with `identify_table` uses your query to choose the most relevant sheet from the compressed encoding.
-2. **Response generation** with `generate_response` reuses your query along with the selected sheet data to produce a textual answer.
+The module `chain_of_spreadsheet.py` implements the full **Chain of Spreadsheet (CoS)** methodology from the paper. This powerful pipeline enables complex reasoning over spreadsheets by breaking tasks down into stages:
 
-The helper script `example_chain_usage.py` shows how to run this pipeline:
+1.  **Table Identification**: Given a query, the system first identifies the most relevant sheet and then uses an LLM to determine the precise boundaries of the table within that sheet that contains the answer.
+2.  **Response Generation**: The identified table data is then passed to the LLM along with the original query to generate a final, accurate response.
+3.  **Table Splitting for Large Tables**: For tables that are too large to fit in the LLM's context window, the CoS pipeline automatically uses the **Table Split QA Algorithm** (Appendix M.2 of the paper). It intelligently splits the table into smaller chunks (preserving the header for context), gets answers from each chunk, and aggregates them into a final response.
 
-```bash
-python example_chain_usage.py workbook.xlsx "What were the totals?"
-```
+The `example_chain_usage.py` script demonstrates how to use this advanced pipeline.
 
-## How It Works
+## How It Works: The `SheetCompressor`
 
-The SpreadsheetLLM encoder works through several key steps:
+The `SheetCompressor` is at the heart of SpreadsheetLLM, using three sophisticated modules to create a compact and semantically rich representation of a spreadsheet.
 
 ### 1. Structural Anchor Detection
 
-The encoder identifies key structural points in the spreadsheet (rows and columns) that define the layout. Boundary candidates are generated where cell type patterns change markedly, then filtered if they overlap with detected header rows. Anchors are thus based on:
-- Cell density changes
-- Format transitions
-- Content type boundaries
+The encoder uses advanced heuristics (as described in Appendix C of the paper) to find structural anchors. This multi-step process involves:
+- **Enumerating Boundaries**: Identifying changes in cell values, styles (borders, fills), and merged regions.
+- **Composing Candidates**: Forming all possible rectangular table candidates from these boundaries.
+- **Filtering**: Removing unreasonable candidates based on size and sparsity, and resolving overlaps using an IoU-based non-maximum suppression approach.
 
-### 2. Cell Neighborhood Extraction
+This produces a highly accurate "skeleton" of the spreadsheet's structure.
 
-Using the identified anchors, the encoder extracts cells within a configurable distance (parameter `k`). This creates a neighborhood around important structural elements while ignoring less relevant areas.
+### 2. Inverted Index Creation
 
-### 3. Inverted Index Creation
+A lossless inverted index is created, mapping cell content to cell addresses. This is highly efficient for spreadsheets with repetitive data or many empty cells, as identical values are merged into address ranges (`A1:C1`) and empty cells are omitted.
 
-Instead of storing each cell individually, the encoder creates an inverted index mapping content values to cell references. Identical values are merged into contiguous address ranges and empty cells are omitted, resulting in a compact representation.
+### 3. Data-Format-Aware Aggregation
 
-### 4. Format Region Aggregation
+This module intelligently groups cells to reduce redundancy and enhance semantic meaning.
+- **Semantic Type Detection**: The encoder now recognizes a wider range of semantic types, including **Integer, Float, and Email**, by inspecting both the number format string and the cell value itself.
+- **DFS-based Aggregation**: Instead of a simple greedy search, the encoder uses a Depth-First Search (DFS) algorithm (as described in Appendix M.1 of the paper) to find all contiguous regions of cells that share the same semantic type and number format. This correctly aggregates complex, non-rectangular shapes.
 
-Cell formats are aggregated into rectangular regions. During this step the encoder
-infers a semantic type (e.g. year, percentage, date) from each cell's number format
-string and groups contiguous cells that share both the type and the raw format
-string. This greatly reduces repeated style data in the output and improves
-compression.
+The final output is a structured JSON document containing the structural anchors, the inverted index, aggregated format regions, and numeric ranges.
 
-### 5. Compression
-
-Heterogeneous rows and columns around anchors are retained while uniform regions are skipped. Numeric cells with identical formatting are clustered into aggregated ranges.
-
-### 6. JSON Encoding
-
-The final output is a structured JSON document containing:
-- File metadata
-- Sheet information
-- Structural anchors
-- Cell values (inverted index with merged ranges)
-- Format regions
-- Numeric ranges
-
-## Output Format
+## Output Formats
 
 The encoder produces a JSON with this structure:
 
@@ -175,12 +157,26 @@ The encoder reports token counts before and after each stage. These values are s
 
 ## Evaluation
 
-Utilities for evaluating table detection are included:
+The repository now includes a comprehensive framework for evaluating SpreadsheetLLM, as described in the paper.
 
-- `evaluation.py` implements the Error-of-Boundary (EoB-0) metric and provides
-  a loader for the Dong et al. (2019) dataset.
-- `run_evaluation.py` executes TableSense-CNN on this dataset and prints the
-  resulting F1 score and basic compression statistics.
+### Table Detection Benchmark
+
+-   **Dataset**: The framework uses spreadsheet files (`.xlsx`) and corresponding JSON annotations, which is the correct format for evaluating SpreadsheetLLM. A new data loader `load_spreadsheet_dataset` is included in `evaluation.py`.
+-   **Evaluation Script**: The `run_llm_evaluation.py` script runs the full table detection benchmark. It encodes spreadsheets, uses a (placeholder) LLM to predict table boundaries, and evaluates the predictions against ground truth using the EoB-0 metric.
+-   **Fine-tuning Preparation**: The `prepare_finetuning_data.py` script can be used to convert a dataset into the JSONL format required for fine-tuning LLMs on the table detection task.
+
+### Spreadsheet QA Benchmark
+
+-   **Dataset**: A new data loader `load_qa_dataset` is included for the Spreadsheet QA benchmark described in Appendix H of the paper.
+-   **Evaluation Script**: The `run_qa_evaluation.py` script evaluates the performance of the full CoS pipeline on the QA task. It calculates the accuracy of the generated answers and includes placeholders for running baseline models like `TaPEx` and `Binder`.
+
+## Vanilla Encoding
+
+For baseline comparisons and debugging, the encoder can produce a simple "vanilla" markdown-like encoding (as described in Section 3.1 of the paper). Use the `--vanilla` flag in the CLI:
+
+```bash
+spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --vanilla --output output.txt
+```
 
 ## Research Background
 
