@@ -48,7 +48,7 @@ def identify_table(encoding: Dict, query: str) -> Optional[str]:
     Identifies the most relevant table for a query using an LLM.
     (CoS Stage 1)
     """
-    sheet_name = _find_relevant_sheet(encoding, query)
+    sheet_name = find_relevant_sheet(encoding, query)
     if not sheet_name:
         logger.warning("Could not identify a relevant sheet for the query.")
         return None
@@ -71,7 +71,7 @@ def identify_table(encoding: Dict, query: str) -> Optional[str]:
     logger.warning(f"Could not parse table range from LLM response: {llm_response}")
     return None
 
-def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
+def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
     """Helper to find the most relevant sheet using simple keyword matching."""
     query_tokens = {t.lower() for t in query.split()}
     best_score = 0
@@ -86,7 +86,21 @@ def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
         if score > best_score:
             best_score = score
             best_sheet = sheet_name
-    return best_sheet
+    if best_sheet:
+        return best_sheet
+
+    sheet_names = list(encoding.get("sheets", {}))
+    if len(sheet_names) == 1:
+        # Fall back to the only available sheet so the CoS flow can still run
+        # when token matching finds nothing useful or there is no competing
+        # sheet to disambiguate against.
+        return sheet_names[0]
+    return None
+
+
+def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
+    """Deprecated wrapper; use find_relevant_sheet directly."""
+    return find_relevant_sheet(encoding, query)
 
 
 def generate_response(sheet_data: Dict, query: str) -> str:

@@ -309,10 +309,6 @@ def find_boundary_candidates(sheet):
             col_candidates.add(c)
             col_candidates.add(c + 1)
 
-    # Filter out candidates that are part of a detected header region
-    header_rows = {idx for idx in range(1, sheet.max_row + 1) if is_header_row(sheet, idx)}
-    row_candidates = {r for r in row_candidates if r not in header_rows}
-
     # Step 2: Compose candidate boundaries
     candidates = []
     if row_candidates and col_candidates:
@@ -785,6 +781,93 @@ def aggregate_regions_dfs(sheet, format_map):
                     processed_cells.add(f"{get_column_letter(c)}{r}")
 
     return dict(aggregated_formats)
+
+
+def aggregate_regions_dfs(sheet, format_map):
+    """Aggregate connected cells by semantic key using DFS."""
+    aggregated_regions = {}
+
+    for key, cells in format_map.items():
+        coords = set()
+        for cell_ref in cells:
+            try:
+                col_letter, row = split_cell_ref(cell_ref)
+                col = get_column_index(col_letter)
+            except Exception:
+                continue
+            coords.add((row, col))
+
+        if not coords:
+            aggregated_regions[key] = []
+            continue
+
+        visited = set()
+        regions = []
+
+        for start in sorted(coords):
+            if start in visited:
+                continue
+
+            stack = [start]
+            component = set()
+
+            while stack:
+                row, col = stack.pop()
+                if (row, col) in visited or (row, col) not in coords:
+                    continue
+                visited.add((row, col))
+                component.add((row, col))
+                stack.extend([
+                    (row - 1, col),
+                    (row + 1, col),
+                    (row, col - 1),
+                    (row, col + 1),
+                ])
+
+            component_rows = {}
+            for row, col in sorted(component):
+                component_rows.setdefault(row, []).append(col)
+
+            pending = []
+            for row in sorted(component_rows):
+                cols = sorted(component_rows[row])
+                start_col = cols[0]
+                prev_col = cols[0]
+                for col in cols[1:]:
+                    if col == prev_col + 1:
+                        prev_col = col
+                        continue
+                    pending.append([row, row, start_col, prev_col])
+                    start_col = col
+                    prev_col = col
+                pending.append([row, row, start_col, prev_col])
+
+            merged = []
+            for row_start, row_end, col_start, col_end in pending:
+                extended = False
+                for existing in merged:
+                    if (
+                        existing[2] == col_start
+                        and existing[3] == col_end
+                        and existing[1] == row_start - 1
+                    ):
+                        existing[1] = row_end
+                        extended = True
+                        break
+                if not extended:
+                    merged.append([row_start, row_end, col_start, col_end])
+
+            for row_start, row_end, col_start, col_end in merged:
+                start_ref = f"{get_column_letter(col_start)}{row_start}"
+                end_ref = f"{get_column_letter(col_end)}{row_end}"
+                if start_ref == end_ref:
+                    regions.append(start_ref)
+                else:
+                    regions.append(f"{start_ref}:{end_ref}")
+
+        aggregated_regions[key] = regions
+
+    return aggregated_regions
 
 
 def cluster_numeric_ranges(sheet, format_map):
