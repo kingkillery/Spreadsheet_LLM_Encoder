@@ -1,7 +1,7 @@
 """Example for the two-stage chain-of-spreadsheet pipeline."""
 import sys
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
-from chain_of_spreadsheet import _find_relevant_sheet, identify_table, generate_response
+from chain_of_spreadsheet import find_relevant_sheet, identify_table, generate_response
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
         print("Failed to encode spreadsheet")
         return
 
-    sheet_name = _find_relevant_sheet(encoding, query)
+    sheet_name = find_relevant_sheet(encoding, query)
     table_range = identify_table(encoding, query)
     if not sheet_name or not table_range:
         print("Could not identify a relevant table")
