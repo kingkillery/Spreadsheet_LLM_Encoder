@@ -86,7 +86,13 @@ def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
         if score > best_score:
             best_score = score
             best_sheet = sheet_name
-    return best_sheet
+    if best_sheet:
+        return best_sheet
+
+    sheet_names = list(encoding.get("sheets", {}))
+    if len(sheet_names) == 1:
+        return sheet_names[0]
+    return None
 
 
 def generate_response(sheet_data: Dict, query: str) -> str:
