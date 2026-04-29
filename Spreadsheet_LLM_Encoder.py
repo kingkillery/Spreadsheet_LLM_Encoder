@@ -721,7 +721,7 @@ def create_inverted_index_translation(inverted_index):
     return merged_index
 
 
-def aggregate_formats(sheet, format_map):
+def aggregate_regions_dfs(sheet, format_map):
     """Aggregate cells with the same inferred type and number format string."""
     aggregated_formats = defaultdict(list)
     processed_cells = set()
@@ -814,7 +814,7 @@ def cluster_numeric_ranges(sheet, format_map):
                         f"{get_column_letter(c)}{r}"
                     )
 
-    return aggregate_formats(sheet, numeric_map)
+    return aggregate_regions_dfs(sheet, numeric_map)
 
 
 def get_column_index(col_letter):
