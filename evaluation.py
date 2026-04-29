@@ -49,7 +49,11 @@ def load_spreadsheet_dataset(path: str) -> List[Dict[str, object]]:
             with open(ann_path, 'r') as f:
                 annotations = json.load(f)
 
-            bboxes = [range_to_bbox(t['range']) for t in annotations.get("tables", [])]
+            tables = annotations.get("tables", [])
+            if not tables:
+                continue
+
+            bboxes = [range_to_bbox(t['range']) for t in tables]
 
             dataset.append({
                 "spreadsheet_path": spreadsheet_path,

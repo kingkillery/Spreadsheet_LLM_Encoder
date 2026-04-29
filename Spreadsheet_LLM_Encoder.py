@@ -309,10 +309,6 @@ def find_boundary_candidates(sheet):
             col_candidates.add(c)
             col_candidates.add(c + 1)
 
-    # Filter out candidates that are part of a detected header region
-    header_rows = {idx for idx in range(1, sheet.max_row + 1) if is_header_row(sheet, idx)}
-    row_candidates = {r for r in row_candidates if r not in header_rows}
-
     # Step 2: Compose candidate boundaries
     candidates = []
     if row_candidates and col_candidates:
