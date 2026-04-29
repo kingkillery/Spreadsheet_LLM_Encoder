@@ -92,13 +92,14 @@ def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
     sheet_names = list(encoding.get("sheets", {}))
     if len(sheet_names) == 1:
         # Fall back to the only available sheet so the CoS flow can still run
-        # when simple token matching cannot disambiguate anything.
+        # when token matching finds nothing useful or there is no competing
+        # sheet to disambiguate against.
         return sheet_names[0]
     return None
 
 
 def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
-    """Backward-compatible wrapper for older imports."""
+    """Deprecated wrapper; use find_relevant_sheet directly."""
     return find_relevant_sheet(encoding, query)
 
 
