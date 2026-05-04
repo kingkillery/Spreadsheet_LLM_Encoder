@@ -66,6 +66,11 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         mock_generate_response.assert_called_once()
         self.assertEqual(response, "Direct answer")
 
+    def test_call_llm_raises_not_implemented(self):
+        """_call_llm must raise NotImplementedError until a backend is configured."""
+        with self.assertRaises(NotImplementedError):
+            cos._call_llm("any prompt")
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -52,7 +52,7 @@ Parameters:
 - `--output`, `-o`: Path to save the JSON output (optional, defaults to input filename with '_spreadsheetllm.json' suffix)
 - `--k`: Neighborhood distance parameter for structural anchors (optional, default=2)
 
-The CLI prints compression ratios for each sheet and overall. These metrics are also stored in the output JSON under `compression_metrics`.
+The CLI prints compression ratios for each sheet and overall to stdout. These metrics are also stored in the output JSON under `compression_metrics` and emitted via the logger at INFO level.
 
 ### Python API
 
@@ -73,13 +73,25 @@ encoding = spreadsheet_llm_encode(
 
 ## Chain-of-Spreadsheet (CoS) Pipeline
 
-The module `chain_of_spreadsheet.py` implements the full **Chain of Spreadsheet (CoS)** methodology from the paper. This powerful pipeline enables complex reasoning over spreadsheets by breaking tasks down into stages:
+The module `chain_of_spreadsheet.py` implements the **Chain of Spreadsheet (CoS)** pipeline structure from the paper, broken into the following stages:
 
-1.  **Table Identification**: Given a query, the system first identifies the most relevant sheet and then uses an LLM to determine the precise boundaries of the table within that sheet that contains the answer.
-2.  **Response Generation**: The identified table data is then passed to the LLM along with the original query to generate a final, accurate response.
-3.  **Table Splitting for Large Tables**: For tables that are too large to fit in the LLM's context window, the CoS pipeline automatically uses the **Table Split QA Algorithm** (Appendix M.2 of the paper). It intelligently splits the table into smaller chunks (preserving the header for context), gets answers from each chunk, and aggregates them into a final response.
+1.  **Table Identification**: Given a query, the system first identifies the most relevant sheet and then calls an LLM to determine the precise boundaries of the table within that sheet that contains the answer.
+2.  **Response Generation**: The compressed sheet encoding is passed to the LLM along with the original query to generate a final response.  Note that, unlike the paper (Section 4.2), this implementation feeds the **already-compressed** representation rather than an uncompressed re-encoding of the identified sub-range; a fully-faithful implementation would require access to the original file.
+3.  **Table Splitting for Large Tables**: For tables that exceed the LLM's context window the pipeline falls back to the **Table Split QA Algorithm** (Appendix M.2).  The current implementation is a **simplified placeholder**: it does not actually split the table into row-based chunks — it passes the same data for every sub-query.  A production implementation must partition the body rows so that each chunk fits within `token_limit`.
 
-The `example_chain_usage.py` script demonstrates how to use this advanced pipeline.
+> **Important – LLM integration required**: `chain_of_spreadsheet.py` does **not** ship with a built-in LLM client.  The internal `_call_llm()` function raises `NotImplementedError` by default.  Before using the CoS pipeline you must supply your own LLM backend:
+>
+> ```python
+> import chain_of_spreadsheet as cos
+>
+> def my_llm(prompt: str) -> str:
+>     # e.g. call OpenAI, Anthropic, or a local model
+>     ...
+>
+> cos._call_llm = my_llm
+> ```
+
+The `example_chain_usage.py` script demonstrates how to use this pipeline once an LLM backend is configured.
 
 ## How It Works: The `SheetCompressor`
 
