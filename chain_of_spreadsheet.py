@@ -1,6 +1,18 @@
 """
 Chain of Spreadsheet (CoS) methodology for SpreadsheetLLM.
-Implements the full CoS pipeline as described in arXiv:2407.09025.
+Implements the CoS pipeline structure as described in arXiv:2407.09025.
+
+NOTE: This module does NOT include a built-in LLM integration.  Before calling
+any CoS function you MUST supply a real LLM backend by reassigning
+``chain_of_spreadsheet._call_llm``.  Example::
+
+    import chain_of_spreadsheet as cos
+
+    def my_llm(prompt: str) -> str:
+        # call OpenAI / Anthropic / local model here
+        ...
+
+    cos._call_llm = my_llm
 """
 from typing import Dict, Optional, Tuple
 import json
@@ -9,19 +21,26 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# --- Placeholder for a real LLM client ---
-# In a real implementation, this would be replaced with a call to a model endpoint
-# (e.g., OpenAI, Anthropic, a local model, etc.)
+
+# --- LLM backend hook ---
+# Replace this function with a real LLM call before using the CoS pipeline.
+# See the module docstring for an example.
 def _call_llm(prompt: str) -> str:
-    """A placeholder function to simulate an LLM call."""
-    logger.warning("Using placeholder LLM. This will not produce real results.")
-    # Simulate identifying a table for Stage 1
-    if "identify the table" in prompt:
-        return "['range': 'A1:F9']"  # Hardcoded response for demonstration
-    # Simulate generating an answer for Stage 2
-    elif "find the cell address" in prompt:
-        return "[B3]" # Hardcoded response
-    return "No valid response from placeholder LLM."
+    """Placeholder that raises ``NotImplementedError``.
+
+    Assign a callable to ``chain_of_spreadsheet._call_llm`` that accepts a
+    prompt string (``str``) and returns the LLM's text response (``str``).
+    Example::
+
+        import chain_of_spreadsheet as cos
+        cos._call_llm = lambda p: my_llm_client.complete(p)
+    """
+    raise NotImplementedError(
+        "_call_llm is a placeholder and has not been configured. "
+        "Assign a real LLM callable before using the CoS pipeline:\n\n"
+        "    import chain_of_spreadsheet as cos\n"
+        "    cos._call_llm = lambda prompt: my_llm_client.complete(prompt)\n"
+    )
 
 # --- Prompt Templates from Appendix L.3 ---
 
@@ -108,12 +127,15 @@ def generate_response(sheet_data: Dict, query: str) -> str:
     Generates a response for a query using an LLM and the identified table data.
     (CoS Stage 2)
 
-    Note: This implementation is simplified. It doesn't re-encode the table
-    without compression as suggested in the paper. A full implementation would
-    require access to the original spreadsheet file to extract and re-encode
-    the identified table range.
+    .. note::
+        This implementation passes the **already-compressed** sheet encoding to
+        the LLM.  The paper (Section 4.2) specifies that Stage 2 should use an
+        *uncompressed* representation of the identified table sub-range.  A
+        fully-faithful implementation would require access to the original
+        spreadsheet file in order to extract and re-encode just that sub-range
+        without compression.
     """
-    # For now, we use the already encoded (compressed) data.
+    # Uses the already-compressed encoding; see docstring note above.
     prompt_input = json.dumps(sheet_data, ensure_ascii=False)
 
     prompt = QA_STAGE2_PROMPT_TEMPLATE.replace("[Encoded Spreadsheet without compression]", prompt_input)
@@ -148,9 +170,24 @@ def table_split_qa(
 ) -> str:
     """
     Handles QA for large tables by splitting them into chunks.
-    Implements Algorithm 2 from Appendix M.2.
+    Intended to implement Algorithm 2 from Appendix M.2.
+
+    .. warning::
+        This is a **simplified placeholder** implementation.  The real algorithm
+        requires access to the original spreadsheet rows in order to create
+        meaningful splits.  The current implementation:
+
+        * Does **not** split the table body into row-based chunks respecting
+          ``token_limit``.
+        * Passes the same (unsplit) ``sheet_data`` to every sub-query instead
+          of actual row slices.
+        * Hardcodes two "chunks" purely for structural demonstration.
+
+        A production implementation must extract body rows, partition them so
+        that ``header + chunk`` fits within ``token_limit``, and call
+        ``generate_response`` on each real chunk.
     """
-    table_data = sheet_data # In a real scenario, we'd extract the sub-table
+    table_data = sheet_data  # In a real scenario, we'd extract the sub-table
 
     if _calculate_token_size(table_data) <= token_limit:
         return generate_response(table_data, query)

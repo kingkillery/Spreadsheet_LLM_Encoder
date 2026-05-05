@@ -948,7 +948,20 @@ def main():
         else:
             args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
 
-    spreadsheet_llm_encode(args.excel_file, args.output, args.k, args.vanilla)
+    result = spreadsheet_llm_encode(args.excel_file, args.output, args.k, args.vanilla)
+
+    if result is not None and not args.vanilla:
+        metrics = result.get("compression_metrics", {})
+        for sheet_name, sm in metrics.get("sheets", {}).items():
+            print(
+                f"{sheet_name}: {sm.get('overall_ratio', 0.0):.2f}x compression "
+                f"(anchors {sm.get('anchor_ratio', 0.0):.2f}x, "
+                f"index {sm.get('inverted_index_ratio', 0.0):.2f}x, "
+                f"formats {sm.get('format_ratio', 0.0):.2f}x)"
+            )
+        overall = metrics.get("overall", {})
+        if overall:
+            print(f"Overall: {overall.get('overall_ratio', 0.0):.2f}x compression")
 
 
 def vanilla_encode(excel_path, output_path=None):
