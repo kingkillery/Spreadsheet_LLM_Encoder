@@ -307,12 +307,34 @@ def extract_sheet_metadata(sheet: openpyxl.worksheet.worksheet.Worksheet) -> Dic
     return {"visibility": visibility, "is_protected": is_protected, "tab_color": tab_color_str}
 
 
+def get_format_regions(sheet_json_data: dict) -> Dict[str, list]:
+    """Return format-region mapping from current or legacy sheet encodings."""
+    formats = sheet_json_data.get("formats")
+    if isinstance(formats, dict):
+        return formats
+    legacy = sheet_json_data.get("format_regions")
+    if isinstance(legacy, dict):
+        return legacy
+    return {}
+
+
+def format_key_number_format(fmt_details: Dict) -> str:
+    """Extract the Excel NFS from current or legacy format-key JSON."""
+    return (
+        fmt_details.get("nfs")
+        or fmt_details.get("number_format")
+        or fmt_details.get("original_number_format")
+        or "General"
+    )
+
+
 def analyze_sheet_for_compression_insights(sheet_json_data: dict) -> Dict[str, dict]:
     """Analyze sheet JSON data for potential compression insights."""
     insights: Dict[str, dict] = {}
 
-    if "format_regions" in sheet_json_data and isinstance(sheet_json_data["format_regions"], dict):
-        format_keys_json_strings = list(sheet_json_data["format_regions"].keys())
+    format_regions = get_format_regions(sheet_json_data)
+    if format_regions:
+        format_keys_json_strings = list(format_regions.keys())
         num_unique_formats_overall = len(format_keys_json_strings)
         potential_redundancy_groups = []
         base_format_groups = {}
@@ -337,7 +359,7 @@ def analyze_sheet_for_compression_insights(sheet_json_data: dict) -> Dict[str, d
                 base_key = make_hashable(core_props_dict)
                 if base_key not in base_format_groups:
                     base_format_groups[base_key] = []
-                base_format_groups[base_key].append(fmt_details.get("number_format", "General"))
+                base_format_groups[base_key].append(format_key_number_format(fmt_details))
             except json.JSONDecodeError:
                 continue
 

@@ -114,6 +114,8 @@ def main(
             llm_correct = False
             tapex_table_range: Optional[str] = None
             tapex_sheet_name: Optional[str] = None
+            stage2_mode = "not_run"
+            stage2_original_range: Optional[str] = None
 
             # --- SpreadsheetLLM Evaluation ---
             try:
@@ -159,6 +161,8 @@ def main(
                     tapex_table_range = unremap_range(table_range, cm) or table_range
                 else:
                     tapex_table_range = table_range
+                stage2_original_range = tapex_table_range
+                stage2_mode = "original_workbook_uncompressed"
             else:
                 logger.warning("  - SpreadsheetLLM could not identify a relevant table.")
 
@@ -192,6 +196,10 @@ def main(
                 "spreadsheetllm": {
                     "predicted": pred_answer_llm,
                     "correct": llm_correct,
+                    "sheet_name": tapex_sheet_name,
+                    "table_range": table_range,
+                    "original_table_range": stage2_original_range,
+                    "stage2_mode": stage2_mode,
                 },
                 f"tapex_{tapex_kind}": {
                     "predicted": pred_answer_tape,

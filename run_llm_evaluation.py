@@ -19,6 +19,20 @@ from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_RANGE_RE = re.compile(r"""(?:['"]([A-Z]+\d+:[A-Z]+\d+)['"]|\b([A-Z]+\d+:[A-Z]+\d+)\b)""")
+
+
+def extract_ranges(text: str) -> List[str]:
+    """Extract quoted or bare Excel ranges from an LLM response."""
+    ranges: List[str] = []
+    seen = set()
+    for match in _RANGE_RE.finditer(text or ""):
+        rng = match.group(1) or match.group(2)
+        if rng not in seen:
+            ranges.append(rng)
+            seen.add(rng)
+    return ranges
+
 TABLE_DETECTION_PROMPT_TEMPLATE = """
 INSTRUCTION:
 Given an input that is a string denoting data of cells in an Excel spreadsheet. The input spreadsheet contains many tuples, describing the cells with content in the spreadsheet. Each tuple consists of two elements separated by a '|': the cell content and the cell address/region, like (Year|A1), ( |A1) or (IntNum|A1:B3). The content in some cells such as '#,##0'/'d-mmm-yy'/'H:mm:ss',etc., represents the CELL DATA FORMATS of Excel. The content in some cells such as 'IntNum'/'DateData'/'EmailData',etc., represents a category of data with the same format and similar semantics. For example, 'IntNum' represents integer type data, and 'ScientificNum' represents scientific notation type data. 'A1:B3' represents a region in a spreadsheet, from the first row to the third row and from column A to column B. Some cells with empty content in the spreadsheet are not entered. Now you should tell me the range of the table in a format like A2:D5, and the range of the table should only CONTAIN HEADER REGION and the data region. DON'T include the title or comments. Note that there can be more than one table in a string, so you should return all the RANGE. DON'T ADD OTHER WORDS OR EXPLANATION.
@@ -42,8 +56,8 @@ def predict_tables_with_llm(encoding: Dict, llm_callable) -> List[BBox]:
 
         llm_response = llm_callable(prompt)
 
-        # Parse ranges like 'A1:F9' or "A1:F9" from the response.
-        ranges = re.findall(r"""['"]([A-Z]+\d+:[A-Z]+\d+)['"]""", llm_response)
+        # Parse ranges like A1:F9, 'A1:F9', or "A1:F9" from the response.
+        ranges = extract_ranges(llm_response)
         for r in ranges:
             if coord_map:
                 unmapped = paper_serializers.unremap_range(r, coord_map)

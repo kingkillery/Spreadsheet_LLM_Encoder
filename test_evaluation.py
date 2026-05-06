@@ -9,6 +9,7 @@ from evaluation import (
     normalize_qa_answer,
     range_to_bbox,
 )
+from run_llm_evaluation import extract_ranges, predict_tables_with_llm
 
 class TestEvaluation(unittest.TestCase):
 
@@ -46,6 +47,26 @@ class TestEvaluation(unittest.TestCase):
     def test_range_to_bbox(self):
         self.assertEqual(range_to_bbox("A1:B2"), (1, 1, 2, 2))
         self.assertEqual(range_to_bbox("C5:C5"), (5, 3, 5, 3))
+
+    def test_table_detection_extracts_quoted_and_bare_ranges(self):
+        self.assertEqual(
+            extract_ranges("'A1:B2', C3:D4, \"A1:B2\""),
+            ["A1:B2", "C3:D4"],
+        )
+
+    def test_predict_tables_accepts_bare_range_response(self):
+        encoding = {
+            "sheets": {
+                "Sheet": {
+                    "cells": {"Header": ["A1"]},
+                    "formats": {},
+                }
+            }
+        }
+
+        boxes = predict_tables_with_llm(encoding, lambda _prompt: "range: A1:B2")
+
+        self.assertEqual(boxes, [(1, 1, 2, 2)])
 
     def test_normalize_qa_answer_by_type(self):
         self.assertEqual(normalize_qa_answer(" a1 ", "cell_address"), "A1")

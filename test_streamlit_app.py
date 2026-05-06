@@ -1,6 +1,13 @@
 import os
 import pandas as pd
 import tempfile
+import json
+
+from app_helpers import (
+    analyze_sheet_for_compression_insights,
+    format_key_number_format,
+    get_format_regions,
+)
 
 # Helper function as defined in the streamlit_app.py logic (or a simplified version for testing)
 
@@ -65,6 +72,25 @@ def test_csv_encoding_handling():
         # Clean up the temporary file
         if os.path.exists(tmp_file_path):
             os.remove(tmp_file_path)
+
+
+def test_format_helpers_accept_current_and_legacy_keys():
+    current_key = json.dumps({"type": "integer", "nfs": "#,##0"}, sort_keys=True)
+    legacy_key = json.dumps(
+        {"font": {"bold": True}, "number_format": "0.00"},
+        sort_keys=True,
+    )
+
+    current = {"formats": {current_key: ["A1:A2"]}}
+    legacy = {"format_regions": {legacy_key: ["B1:B2"]}}
+
+    assert get_format_regions(current) == current["formats"]
+    assert get_format_regions(legacy) == legacy["format_regions"]
+    assert format_key_number_format(json.loads(current_key)) == "#,##0"
+    assert format_key_number_format(json.loads(legacy_key)) == "0.00"
+
+    insights = analyze_sheet_for_compression_insights(current)
+    assert insights["format_analysis"]["num_unique_formats_overall"] == 1
 
 # Example of how to run this test with pytest (if desired, not run by the agent directly)
 # if __name__ == "__main__":

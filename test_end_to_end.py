@@ -223,6 +223,12 @@ class TestEndToEnd(unittest.TestCase):
                         "tapex_placeholder", "binder_unavailable"):
                 self.assertIn(sub, pq)
             self.assertIn("answer_type", pq)
+            self.assertEqual(
+                pq["spreadsheetllm"]["stage2_mode"],
+                "original_workbook_uncompressed",
+            )
+            self.assertIn("table_range", pq["spreadsheetllm"])
+            self.assertIn("original_table_range", pq["spreadsheetllm"])
 
     def test_synth_qa_round_trips_through_qa_dataset_loader(self):
         # 1. Synthesize annotated workbooks.

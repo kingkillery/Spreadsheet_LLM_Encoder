@@ -9,6 +9,8 @@ from app_helpers import (
     detect_tables_in_sheet,
     extract_chart_info_from_sheet,
     parse_number_format_string,
+    get_format_regions,
+    format_key_number_format,
     extract_sheet_metadata,
     analyze_sheet_for_compression_insights,
     generate_common_value_map,
@@ -84,12 +86,13 @@ def main():
                                 if chart_list:
                                     sheet_data_node["charts"] = chart_list
 
-                                if "format_regions" in sheet_data_node:
+                                format_regions = get_format_regions(sheet_data_node)
+                                if format_regions:
                                     parsed_number_formats_map = {}
-                                    for fmt_key_json, _ in sheet_data_node["format_regions"].items():
+                                    for fmt_key_json, _ in format_regions.items():
                                         try:
                                             fmt_details = json.loads(fmt_key_json)
-                                            number_format_str = fmt_details.get("number_format")
+                                            number_format_str = format_key_number_format(fmt_details)
                                             if number_format_str and number_format_str not in parsed_number_formats_map:
                                                 parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
                                         except json.JSONDecodeError:
@@ -165,12 +168,13 @@ def main():
                                     if chart_list:
                                         sheet_data_node["charts"] = chart_list
 
-                                    if "format_regions" in sheet_data_node:
+                                    format_regions = get_format_regions(sheet_data_node)
+                                    if format_regions:
                                         parsed_number_formats_map = {}
-                                        for fmt_key_json, _ in sheet_data_node["format_regions"].items():
+                                        for fmt_key_json, _ in format_regions.items():
                                             try:
                                                 fmt_details = json.loads(fmt_key_json)
-                                                number_format_str = fmt_details.get("number_format")
+                                                number_format_str = format_key_number_format(fmt_details)
                                                 if number_format_str and number_format_str not in parsed_number_formats_map:
                                                     parsed_number_formats_map[number_format_str] = parse_number_format_string(number_format_str)
                                             except json.JSONDecodeError:
