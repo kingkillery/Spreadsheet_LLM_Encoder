@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 import openpyxl
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 
@@ -28,18 +31,20 @@ def create_workbook_with_homogeneous_rows(path):
     wb.save(path)
 
 
-def test_numeric_range_aggregation(tmp_path):
-    file_path = tmp_path / "num.xlsx"
-    create_workbook_numeric_region(str(file_path))
-    result = spreadsheet_llm_encode(str(file_path))
-    ranges = result['sheets']['Sheet']['numeric_ranges']
-    assert isinstance(ranges, dict)
+def test_numeric_range_aggregation():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        file_path = os.path.join(tmpdir, "num.xlsx")
+        create_workbook_numeric_region(file_path)
+        result = spreadsheet_llm_encode(file_path)
+        ranges = result['sheets']['Sheet']['numeric_ranges']
+        assert isinstance(ranges, dict)
 
 
-def test_homogeneous_rows_skipped(tmp_path):
-    file_path = tmp_path / "homog.xlsx"
-    create_workbook_with_homogeneous_rows(str(file_path))
-    result = spreadsheet_llm_encode(str(file_path), k=1)
-    cells = result['sheets']['Sheet']['cells']
-    refs = [ref for lst in cells.values() for ref in lst]
-    assert not any(ref.endswith('2') or ref.endswith('3') for ref in refs)
+def test_homogeneous_rows_skipped():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        file_path = os.path.join(tmpdir, "homog.xlsx")
+        create_workbook_with_homogeneous_rows(file_path)
+        result = spreadsheet_llm_encode(file_path, k=1)
+        cells = result['sheets']['Sheet']['cells']
+        refs = [ref for lst in cells.values() for ref in lst]
+        assert not any(ref.endswith('2') or ref.endswith('3') for ref in refs)

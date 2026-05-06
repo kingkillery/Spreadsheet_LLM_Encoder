@@ -185,6 +185,21 @@ class TestLabelForFormatKey(unittest.TestCase):
     def test_percentage_maps_to_percentagenum(self):
         self.assertEqual(ps.label_for_format_key(_fmt_key("percentage")), "PercentageNum")
 
+    def test_year_maps_to_paper_year_label(self):
+        self.assertEqual(ps.label_for_format_key(_fmt_key("year")), "Year")
+
+    def test_informative_integer_nfs_is_emitted(self):
+        self.assertEqual(ps.label_for_format_key(_fmt_key("integer", "#,##0")), "#,##0")
+
+    def test_informative_date_nfs_is_emitted(self):
+        self.assertEqual(ps.label_for_format_key(_fmt_key("date", "d-mmm-yy")), "d-mmm-yy")
+
+    def test_informative_time_nfs_is_emitted(self):
+        self.assertEqual(ps.label_for_format_key(_fmt_key("time", "H:mm:ss")), "H:mm:ss")
+
+    def test_generic_number_format_is_not_informative(self):
+        self.assertFalse(ps.is_informative_number_format("0.00"))
+
     def test_text_returns_none(self):
         self.assertIsNone(ps.label_for_format_key(_fmt_key("text")))
 
@@ -217,6 +232,15 @@ class TestCompressedPrompt(unittest.TestCase):
         }
         result = ps.to_paper_compressed_prompt(encoding)
         self.assertEqual(result, "(IntNum|A1:B2)")
+
+    def test_informative_nfs_region_suppresses_literal_tuples(self):
+        date_key = _fmt_key("date", "yyyy/mm/dd")
+        encoding = {
+            "cells": {"2024-01-01": ["A1", "A2"]},
+            "formats": {date_key: ["A1:A2"]},
+        }
+        result = ps.to_paper_compressed_prompt(encoding)
+        self.assertEqual(result, "(yyyy/mm/dd|A1:A2)")
 
     def test_mixed_literal_and_label_region_in_row_major_order(self):
         int_key = _fmt_key("integer", "0")

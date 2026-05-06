@@ -148,13 +148,10 @@ class TestChainOfSpreadsheet(unittest.TestCase):
             os.remove(tmp_xlsx)
             os.rmdir(tmp_dir)
 
-        # Real chunking: more than one LLM call.
+        # Real chunking: chunk calls plus a final synthesis call.
         self.assertGreater(len(backend.calls), 1)
-        # Aggregated result.
-        self.assertTrue(
-            result.startswith("Aggregated"),
-            msg=f"Expected result to start with 'Aggregated'; got: {result[:80]!r}",
-        )
+        self.assertIn("Candidate Answers", backend.calls[-1])
+        self.assertEqual(result, "X")
 
     # ------------------------------------------------------------------
     # table_split_qa — over-budget single row still dispatched with a warning
@@ -195,8 +192,9 @@ class TestChainOfSpreadsheet(unittest.TestCase):
             os.remove(tmp_xlsx)
             os.rmdir(tmp_dir)
 
-        self.assertGreaterEqual(len(backend.calls), 1)
-        self.assertTrue(result.startswith("Aggregated"))
+        self.assertGreaterEqual(len(backend.calls), 2)
+        self.assertIn("Candidate Answers", backend.calls[-1])
+        self.assertEqual(result, "ans")
         self.assertTrue(
             any("token_limit" in line for line in cm.output),
             msg=f"Expected over-budget warning; got: {cm.output}",

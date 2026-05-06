@@ -1,6 +1,8 @@
 import argparse
+import hashlib
 import json
 import logging
+import os
 from typing import List, Dict, Optional
 
 import paper_serializers
@@ -71,6 +73,42 @@ def format_for_finetuning(encoding: Dict, gt_boxes: List[BBox]) -> List[Dict]:
     return records
 
 
+def build_finetune_manifest(
+    *,
+    dataset_dir: str,
+    output_path: str,
+    k: int,
+    record_count: int,
+    push_to_hub_repo: Optional[str] = None,
+    hub_split: str = "train",
+) -> Dict:
+    """Build sidecar metadata for reproducible fine-tuning JSONL records."""
+    return {
+        "task": "table_detection_finetuning_data",
+        "dataset_dir": os.path.abspath(dataset_dir),
+        "output_path": os.path.abspath(output_path),
+        "record_count": record_count,
+        "encoder_settings": {"k": k},
+        "prompt_serializer": "paper_serializers.to_paper_compressed_prompt",
+        "prompt_template_sha256": hashlib.sha256(
+            TABLE_DETECTION_PROMPT_TEMPLATE.encode("utf-8")
+        ).hexdigest(),
+        "coordinate_mode": "compact_prompt_ranges",
+        "completion_coordinate_mode": "compact_prompt_ranges",
+        "ground_truth_unmapped_policy": "skip_with_warning",
+        "hub_repo": push_to_hub_repo,
+        "hub_split": hub_split,
+    }
+
+
+def write_finetune_manifest(manifest: Dict, output_path: str) -> None:
+    """Write fine-tuning sidecar metadata as pretty JSON."""
+    out_path = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2)
+
+
 def push_to_hub(
     output_path: str,
     repo_id: str,
@@ -106,6 +144,7 @@ def main(
     push_to_hub_repo: Optional[str] = None,
     hub_split: str = "train",
     hub_private: bool = True,
+    metadata_output: Optional[str] = None,
 ) -> None:
     """
     Main function to prepare data for fine-tuning.
@@ -116,6 +155,7 @@ def main(
         logger.error("No data found in the specified dataset directory.")
         return
 
+    record_count = 0
     with open(output_path, "w", encoding="utf-8") as f:
         for item in data:
             logger.info("Processing %s for fine-tuning...", item["spreadsheet_path"])
@@ -135,8 +175,21 @@ def main(
             # 3. Write each record as a JSONL line
             for record in ft_records:
                 f.write(json.dumps(record) + "\n")
+                record_count += 1
 
     logger.info("Fine-tuning data successfully prepared and saved to %s", output_path)
+
+    if metadata_output:
+        manifest = build_finetune_manifest(
+            dataset_dir=dataset_dir,
+            output_path=output_path,
+            k=k,
+            record_count=record_count,
+            push_to_hub_repo=push_to_hub_repo,
+            hub_split=hub_split,
+        )
+        write_finetune_manifest(manifest, metadata_output)
+        logger.info("Fine-tuning metadata saved to %s", metadata_output)
 
     if push_to_hub_repo:
         push_to_hub(output_path, push_to_hub_repo, hub_split, hub_private)
@@ -174,6 +227,11 @@ if __name__ == "__main__":
         default="train",
         help="Dataset split name to push (default: train).",
     )
+    parser.add_argument(
+        "--metadata-output",
+        default=None,
+        help="Optional path for a JSON sidecar describing the generated JSONL.",
+    )
     args = parser.parse_args()
     main(
         args.dataset_dir,
@@ -182,4 +240,5 @@ if __name__ == "__main__":
         push_to_hub_repo=args.push_to_hub,
         hub_split=args.hub_split,
         hub_private=args.hub_private,
+        metadata_output=args.metadata_output,
     )

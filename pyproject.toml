@@ -43,6 +43,7 @@ py-modules = [
     "baselines",
     "chain_of_spreadsheet",
     "evaluation",
+    "evaluation_metadata",
     "llm_backend",
     "paper_serializers",
     "prepare_finetuning_data",

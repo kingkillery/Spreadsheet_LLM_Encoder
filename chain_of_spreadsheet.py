@@ -85,6 +85,21 @@ INPUT:
 [Question]
 """
 
+QA_FINAL_SYNTHESIS_PROMPT_TEMPLATE = """
+INSTRUCTION:
+Given a spreadsheet question and candidate answers produced from row chunks of
+the same table, choose or synthesize the final answer. Return only the final
+answer in the same bracketed format, like '[B3]' or '[SUM(A2:A10)]'.
+DON'T ADD ANY OTHER WORDS.
+
+INPUT:
+Question:
+[Question]
+
+Candidate Answers:
+[Candidate Answers]
+"""
+
 
 # --- Internal helpers --------------------------------------------------------
 
@@ -381,7 +396,7 @@ def table_split_qa(
         answers.append(_call_llm(candidate_prompt))
         i = j
 
-    return "Aggregated answers from sub-tables:\n" + "\n".join(answers)
+    return _synthesize_chunk_answers(query, answers)
 
 
 def _render_chunk_prompt(
@@ -395,3 +410,13 @@ def _render_chunk_prompt(
         workbook_path, sheet_name, original_range, rows
     )
     return _build_stage2_prompt(pair_string, query)
+
+
+def _synthesize_chunk_answers(query: str, answers: Sequence[str]) -> str:
+    """Run the final CoS synthesis step over per-chunk candidate answers."""
+    if not answers:
+        return "[]"
+    answer_block = "\n".join(f"{idx + 1}. {answer}" for idx, answer in enumerate(answers))
+    prompt = QA_FINAL_SYNTHESIS_PROMPT_TEMPLATE.replace("[Question]", query)
+    prompt = prompt.replace("[Candidate Answers]", answer_block)
+    return _call_llm(prompt)

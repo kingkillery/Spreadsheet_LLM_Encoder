@@ -136,12 +136,24 @@ class TestEndToEnd(unittest.TestCase):
         for key in (
             "timestamp", "task", "dataset_dir", "k", "backend",
             "n_items", "avg_f1_eob0", "per_item", "meta",
+            "evaluation_metadata",
         ):
             self.assertIn(key, record)
         self.assertEqual(record["task"], "table_detection_eob0")
         self.assertEqual(record["k"], 4)
         self.assertEqual(record["backend"], "echo")
         self.assertEqual(record["n_items"], 2)
+        metadata = record["evaluation_metadata"]
+        for key in (
+            "dataset_name", "dataset_version", "split_name",
+            "spreadsheet_count", "table_count", "qa_item_count",
+            "encoder_settings", "prompt_serializer", "coordinate_mode",
+            "model_backend", "metric_definition", "baseline_name",
+            "baseline_version", "skip_reasons",
+        ):
+            self.assertIn(key, metadata)
+        self.assertEqual(metadata["model_backend"], "echo")
+        self.assertEqual(metadata["encoder_settings"]["k"], 4)
         self.assertEqual(len(record["per_item"]), 2)
         for item in record["per_item"]:
             for sub_key in ("spreadsheet_path", "gt_count", "pred_count",
@@ -187,8 +199,9 @@ class TestEndToEnd(unittest.TestCase):
             "timestamp", "task", "dataset_dir", "k", "backend",
             "n_questions", "spreadsheetllm_accuracy_pct",
             "tapex_accuracy_pct", "tapex_kind",
-            "binder_placeholder_accuracy_pct",
+            "binder_accuracy_pct", "binder_status", "binder_skip_reason",
             "baselines_are_placeholders", "per_question", "meta",
+            "evaluation_metadata",
         ):
             self.assertIn(key, record, msg=f"missing key: {key}")
         self.assertEqual(record["task"], "spreadsheet_qa")
@@ -196,13 +209,20 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(record["backend"], "echo")
         # Without --real-tapex the run uses the placeholder.
         self.assertEqual(record["tapex_kind"], "placeholder")
+        self.assertEqual(record["binder_status"], "unavailable")
+        self.assertIsNone(record["binder_accuracy_pct"])
         self.assertTrue(record["baselines_are_placeholders"])
+        metadata = record["evaluation_metadata"]
+        self.assertEqual(metadata["model_backend"], "echo")
+        self.assertEqual(metadata["qa_item_count"], record["n_questions"])
+        self.assertGreaterEqual(len(metadata["skip_reasons"]), 1)
         self.assertGreater(record["n_questions"], 0)
         self.assertEqual(len(record["per_question"]), record["n_questions"])
         for pq in record["per_question"]:
             for sub in ("question", "ground_truth", "spreadsheetllm",
-                        "tapex_placeholder", "binder_placeholder"):
+                        "tapex_placeholder", "binder_unavailable"):
                 self.assertIn(sub, pq)
+            self.assertIn("answer_type", pq)
 
     def test_synth_qa_round_trips_through_qa_dataset_loader(self):
         # 1. Synthesize annotated workbooks.

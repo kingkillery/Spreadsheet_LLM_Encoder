@@ -1,13 +1,19 @@
 import argparse
 import datetime as _dt
-import json
 import logging
 import os
 import re
 from typing import List, Dict, Optional
 
 import paper_serializers
-from evaluation import load_spreadsheet_dataset, evaluate_detections, range_to_bbox, BBox
+from evaluation import (
+    load_spreadsheet_dataset,
+    load_table_detection_manifest,
+    evaluate_detections,
+    range_to_bbox,
+    BBox,
+)
+from evaluation_metadata import build_evaluation_metadata, write_evaluation_record
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +66,7 @@ def main(
     out_record: Optional[str] = None,
     backend_name: str = "unknown",
     extra_meta: Optional[Dict] = None,
+    manifest_path: Optional[str] = None,
 ):
     """Main function to run the LLM-based table detection evaluation.
 
@@ -67,7 +74,11 @@ def main(
     timestamp, dataset, k, backend, per-item F1, and average F1 — feeds the
     spreadsheet-llm-fidelity skill_runs log without log-string parsing.
     """
-    data = load_spreadsheet_dataset(dataset_dir)
+    data = (
+        load_table_detection_manifest(manifest_path)
+        if manifest_path
+        else load_spreadsheet_dataset(dataset_dir)
+    )
     total_f1 = 0.0
     per_item: List[Dict] = []
 
@@ -109,22 +120,40 @@ def main(
     logger.info("---------------------------------")
 
     if out_record:
+        table_count = sum(len(item["bboxes"]) for item in data)
+        dataset_meta = data[0] if data else {}
+        evaluation_metadata = build_evaluation_metadata(
+            dataset_dir=manifest_path or dataset_dir,
+            task="table_detection",
+            dataset_name=dataset_meta.get("dataset_name"),
+            dataset_version=dataset_meta.get("dataset_version", "unspecified"),
+            split_name=dataset_meta.get("split_name", "unspecified"),
+            spreadsheet_count=len(data),
+            table_count=table_count,
+            qa_item_count=0,
+            encoder_settings={"k": k},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend=backend_name,
+            metric_definition="EoB-0 exact boundary matching; threshold=0.0",
+            baseline_name="SpreadsheetLLM table detection",
+            skip_reasons=[],
+        )
         record = {
             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "task": "table_detection_eob0",
             "dataset_dir": os.path.abspath(dataset_dir),
+            "manifest_path": os.path.abspath(manifest_path) if manifest_path else None,
             "k": k,
             "backend": backend_name,
             "n_items": len(data),
             "avg_f1_eob0": avg_f1,
             "per_item": per_item,
             "meta": extra_meta or {},
+            "evaluation_metadata": evaluation_metadata,
         }
-        out_path = os.path.abspath(out_record)
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump(record, fh, indent=2)
-        logger.info("Wrote evaluation record to %s", out_path)
+        write_evaluation_record(record, out_record)
+        logger.info("Wrote evaluation record to %s", os.path.abspath(out_record))
 
 
 if __name__ == "__main__":
@@ -151,6 +180,11 @@ if __name__ == "__main__":
         help="Optional path. When set, write a structured JSON record of "
              "the evaluation (timestamp, k, backend, per-item F1, avg F1).",
     )
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Optional table-detection manifest JSON. When set, it overrides dataset_dir scanning.",
+    )
     args = parser.parse_args()
 
     from llm_backend import EchoBackend, OpenAIBackend
@@ -168,4 +202,5 @@ if __name__ == "__main__":
         llm_callable,
         out_record=args.out_record,
         backend_name=backend_name,
+        manifest_path=args.manifest,
     )

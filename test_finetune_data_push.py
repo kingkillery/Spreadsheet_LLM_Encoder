@@ -115,6 +115,48 @@ class TestFormatForFinetuningCoordinates(unittest.TestCase):
         self.assertEqual(records[0]["completion"], "[]")
 
 
+class TestFinetuneManifest(unittest.TestCase):
+    """Fine-tuning JSONL can carry reproducibility sidecar metadata."""
+
+    def test_build_manifest_records_coordinate_contract(self):
+        mod = _load_module()
+
+        manifest = mod.build_finetune_manifest(
+            dataset_dir="datasets/train",
+            output_path="out/train.jsonl",
+            k=4,
+            record_count=7,
+            push_to_hub_repo="user/dataset",
+            hub_split="train",
+        )
+
+        self.assertEqual(manifest["task"], "table_detection_finetuning_data")
+        self.assertEqual(manifest["record_count"], 7)
+        self.assertEqual(manifest["encoder_settings"]["k"], 4)
+        self.assertEqual(manifest["coordinate_mode"], "compact_prompt_ranges")
+        self.assertEqual(
+            manifest["completion_coordinate_mode"],
+            manifest["coordinate_mode"],
+        )
+        self.assertIn("prompt_template_sha256", manifest)
+
+    def test_write_manifest_creates_json_file(self):
+        mod = _load_module()
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as tf:
+            tmp_path = tf.name
+
+        try:
+            mod.write_finetune_manifest({"task": "x"}, tmp_path)
+            with open(tmp_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        finally:
+            os.unlink(tmp_path)
+
+        self.assertEqual(data, {"task": "x"})
+
+
 class TestPushToHubNotCalledWhenFlagAbsent(unittest.TestCase):
     """When --push-to-hub is None, datasets must never be imported or called."""
 

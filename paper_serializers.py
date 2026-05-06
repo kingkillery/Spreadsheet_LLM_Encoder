@@ -32,15 +32,29 @@ SEMANTIC_LABEL: Dict[str, str] = {
     "numeric": "FloatNum",
     "date": "DateData",
     "datetime": "DateData",
-    "time": "TimeData",
-    "year": "YearData",
+    "time": "Time",
+    "year": "Year",
     "email": "EmailData",
     "scientific_notation": "ScientificNum",
     "percentage": "PercentageNum",
-    "currency": "CurrencyNum",
+    "currency": "Currency",
 }
 
 COMPRESSIBLE_TYPES = set(SEMANTIC_LABEL.keys())
+
+GENERIC_NUMBER_FORMATS = {
+    "",
+    "General",
+    "@",
+    "0",
+    "0.0",
+    "0.00",
+    "0.000",
+    "0%",
+    "0.0%",
+    "0.00%",
+    "0.000%",
+}
 
 # Maximum cell count we'll iterate over for an LLM-supplied or workbook-derived
 # range. Pathological inputs like ``A1:ZZZ999999`` would otherwise pin a CPU.
@@ -225,14 +239,34 @@ def to_vanilla_prompt_for_workbook(workbook_path: str) -> Dict[str, str]:
 
 # --- Compressed prompt -------------------------------------------------------
 
+def is_informative_number_format(nfs: Optional[str]) -> bool:
+    """Return true when an Excel NFS should be shown instead of a label."""
+    if nfs is None:
+        return False
+    nfs = str(nfs).strip()
+    if nfs in GENERIC_NUMBER_FORMATS:
+        return False
+    return bool(nfs)
+
+
 def label_for_format_key(format_key: str) -> Optional[str]:
-    """Return the paper label for a serialised ``{type, nfs}`` key, or ``None``
-    if the type is not compressible (text/boolean/etc.)."""
+    """Return prompt content for a serialised ``{type, nfs}`` key.
+
+    The paper's prompt contract uses both semantic labels (``IntNum``,
+    ``DateData``, ``EmailData``) and actual Excel number-format strings
+    (``#,##0``, ``d-mmm-yy``, ``H:mm:ss``). Generic NFS values keep the
+    semantic label; informative NFS values are emitted directly.
+    """
     try:
         info = json.loads(format_key)
     except (TypeError, ValueError):
         return None
     sem_type = info.get("type")
+    if sem_type not in COMPRESSIBLE_TYPES:
+        return None
+    nfs = info.get("nfs")
+    if is_informative_number_format(nfs):
+        return str(nfs).strip()
     if sem_type in COMPRESSIBLE_TYPES:
         return SEMANTIC_LABEL[sem_type]
     return None
@@ -391,6 +425,7 @@ __all__ = [
     "unremap_range",
     "to_paper_vanilla_prompt",
     "to_vanilla_prompt_for_workbook",
+    "is_informative_number_format",
     "label_for_format_key",
     "to_paper_compressed_prompt",
     "to_stage2_uncompressed_prompt",

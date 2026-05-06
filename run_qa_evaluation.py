@@ -1,17 +1,22 @@
 import argparse
 import datetime as _dt
-import json
 import logging
 import os
 from typing import List, Dict, Optional
 
 import chain_of_spreadsheet
-from evaluation import load_qa_dataset
+from evaluation import load_qa_dataset, load_qa_manifest, normalize_qa_answer
+from evaluation_metadata import build_evaluation_metadata, write_evaluation_record
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 from chain_of_spreadsheet import identify_table, table_split_qa
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+BINDER_UNAVAILABLE_REASON = (
+    "Binder baseline requires a real neural-symbolic SQL adapter; "
+    "this repository does not implement one yet."
+)
 
 
 def run_tape_placeholder(encoding: Dict, query: str) -> str:
@@ -47,32 +52,41 @@ def run_tape_real(
         return "[]"
 
 
-def run_binder_placeholder(encoding: Dict, query: str) -> str:
-    """Placeholder for Binder baseline.
+def run_binder_unavailable() -> Optional[str]:
+    """Return no Binder prediction until a real adapter exists."""
+    logger.info("Skipping Binder baseline: %s", BINDER_UNAVAILABLE_REASON)
+    return None
 
-    # TODO: Real Binder baseline requires separate integration work; this is
-    # intentionally a stub flagged by the gap analysis.
-    """
-    logger.info("Running placeholder Binder baseline...")
-    return "[SUM(D1:D5)]"  # Dummy response
+
+QA_METRIC_DEFINITION = (
+    "Per-item answer-type aware exact match via evaluation.normalize_qa_answer "
+    "(cell_address: trimmed + uppercased; "
+    "formula: whitespace-stripped + uppercased; "
+    "free_text: casefolded + collapsed whitespace; "
+    "literal: stripped only). Default answer_type when unspecified is 'literal'."
+)
 
 
 def main(
-    dataset_dir: str,
+    dataset_dir: Optional[str],
     k: int,
     out_record: Optional[str] = None,
     backend_name: str = "unknown",
     extra_meta: Optional[Dict] = None,
     tapex=None,
+    manifest_path: Optional[str] = None,
 ):
     """Main function to run the Spreadsheet QA evaluation.
 
-    When ``out_record`` is given, also persist a structured JSON record
+    Either ``dataset_dir`` or ``manifest_path`` must be supplied. When
+    ``out_record`` is given, also persist a structured JSON record
     (timestamp, dataset, k, backend, per-question results, accuracies)
     so the spreadsheet-llm-fidelity skill_runs log can track QA accuracy
     iteration-over-iteration without log-string parsing.
     """
-    dataset = load_qa_dataset(dataset_dir)
+    if not dataset_dir and not manifest_path:
+        raise ValueError("either dataset_dir or manifest_path must be provided")
+    dataset = load_qa_manifest(manifest_path) if manifest_path else load_qa_dataset(dataset_dir)
 
     if not dataset:
         logger.error("No QA data found in the specified dataset directory.")
@@ -81,7 +95,6 @@ def main(
     total_questions = 0
     correct_spreadsheetllm = 0
     correct_tape = 0
-    correct_binder = 0
     per_question: List[Dict] = []
 
     for item in dataset:
@@ -98,6 +111,7 @@ def main(
             total_questions += 1
             query = qa["question"]
             ground_truth = qa["answer"]
+            answer_type = qa.get("answer_type", "literal")
 
             logger.info("Q: %s (GT: %s)", query, ground_truth)
 
@@ -135,7 +149,9 @@ def main(
                 )
 
                 logger.info("  - SpreadsheetLLM Predicted: %s", pred_answer_llm)
-                if pred_answer_llm.strip() == ground_truth.strip():
+                norm_pred = normalize_qa_answer(pred_answer_llm, answer_type)
+                norm_gt = normalize_qa_answer(ground_truth, answer_type)
+                if norm_pred == norm_gt:
                     correct_spreadsheetllm += 1
                     llm_correct = True
 
@@ -162,20 +178,22 @@ def main(
                 pred_answer_tape = run_tape_placeholder(encoding, query)
                 tapex_kind = "placeholder"
             logger.info("  - TaPEx Predicted: %s", pred_answer_tape)
-            tape_correct = pred_answer_tape.strip() == ground_truth.strip()
+            tape_correct = (
+                normalize_qa_answer(pred_answer_tape, answer_type)
+                == normalize_qa_answer(ground_truth, answer_type)
+            )
             if tape_correct:
                 correct_tape += 1
 
-            pred_answer_binder = run_binder_placeholder(encoding, query)
-            logger.info("  - Binder Predicted: %s", pred_answer_binder)
-            binder_correct = pred_answer_binder.strip() == ground_truth.strip()
-            if binder_correct:
-                correct_binder += 1
+            pred_answer_binder = run_binder_unavailable()
+            logger.info("  - Binder Predicted: unavailable")
+            binder_correct = False
 
             per_question.append({
                 "spreadsheet_path": spreadsheet_path,
                 "question": query,
                 "ground_truth": ground_truth,
+                "answer_type": answer_type,
                 "spreadsheetllm": {
                     "predicted": pred_answer_llm,
                     "correct": llm_correct,
@@ -184,20 +202,20 @@ def main(
                     "predicted": pred_answer_tape,
                     "correct": tape_correct,
                 },
-                "binder_placeholder": {
+                "binder_unavailable": {
                     "predicted": pred_answer_binder,
                     "correct": binder_correct,
+                    "skip_reason": BINDER_UNAVAILABLE_REASON,
                 },
             })
 
     # --- Report Results ---
     logger.info("\n--- QA Evaluation Summary ---")
-    acc_llm = acc_tape = acc_binder = 0.0
+    acc_llm = acc_tape = 0.0
+    acc_binder = None
     if total_questions > 0:
         acc_llm = (correct_spreadsheetllm / total_questions) * 100
         acc_tape = (correct_tape / total_questions) * 100
-        acc_binder = (correct_binder / total_questions) * 100
-
         logger.info(
             "SpreadsheetLLM Accuracy: %.2f%% (%d/%d)",
             acc_llm, correct_spreadsheetllm, total_questions,
@@ -206,36 +224,62 @@ def main(
             "TaPEx Baseline Accuracy: %.2f%% (%d/%d)",
             acc_tape, correct_tape, total_questions,
         )
-        logger.info(
-            "Binder Baseline Accuracy: %.2f%% (%d/%d)",
-            acc_binder, correct_binder, total_questions,
-        )
+        logger.info("Binder Baseline: unavailable (%s)", BINDER_UNAVAILABLE_REASON)
     else:
         logger.info("No questions were evaluated.")
     logger.info("--------------------------")
 
     if out_record:
         tapex_real = tapex is not None
+        skip_reasons = [
+            {
+                "component": "binder",
+                "reason": BINDER_UNAVAILABLE_REASON,
+            }
+        ]
+        if not tapex_real:
+            skip_reasons.append({
+                "component": "tapex",
+                "reason": "Run omitted --real-tapex; placeholder baseline used.",
+            })
+        evaluation_metadata = build_evaluation_metadata(
+            dataset_dir=manifest_path or dataset_dir,
+            task="spreadsheet_qa",
+            dataset_name=dataset[0].get("dataset_name") if dataset else None,
+            dataset_version=dataset[0].get("dataset_version", "unspecified") if dataset else "unspecified",
+            split_name=dataset[0].get("split_name", "unspecified") if dataset else "unspecified",
+            spreadsheet_count=len(dataset),
+            table_count=0,
+            qa_item_count=total_questions,
+            encoder_settings={"k": k},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt + stage2_uncompressed_pairs_when_available",
+            coordinate_mode="compact_stage1_original_stage2_when_workbook_available",
+            model_backend=backend_name,
+            metric_definition=QA_METRIC_DEFINITION,
+            baseline_name="SpreadsheetLLM QA with TaPEx/Binder baselines",
+            skip_reasons=skip_reasons,
+        )
         record = {
             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "task": "spreadsheet_qa",
             "dataset_dir": os.path.abspath(dataset_dir),
+            "manifest_path": os.path.abspath(manifest_path) if manifest_path else None,
             "k": k,
             "backend": backend_name,
             "n_questions": total_questions,
             "spreadsheetllm_accuracy_pct": acc_llm,
             "tapex_accuracy_pct": acc_tape,
             "tapex_kind": "real" if tapex_real else "placeholder",
-            "binder_placeholder_accuracy_pct": acc_binder,
-            "baselines_are_placeholders": not tapex_real,  # Binder still placeholder
+            "binder_accuracy_pct": acc_binder,
+            "binder_status": "unavailable",
+            "binder_skip_reason": BINDER_UNAVAILABLE_REASON,
+            "baselines_are_placeholders": not tapex_real,
             "per_question": per_question,
             "meta": extra_meta or {},
+            "evaluation_metadata": evaluation_metadata,
         }
-        out_path = os.path.abspath(out_record)
-        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as fh:
-            json.dump(record, fh, indent=2)
-        logger.info("Wrote QA evaluation record to %s", out_path)
+        write_evaluation_record(record, out_record)
+        logger.info("Wrote QA evaluation record to %s", os.path.abspath(out_record))
 
 
 if __name__ == "__main__":
@@ -263,6 +307,11 @@ if __name__ == "__main__":
         help="Optional path. When set, write a structured JSON record of "
              "the QA evaluation (timestamp, k, backend, per-question results, "
              "accuracies) so it can be diffed across iterations.",
+    )
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Optional QA manifest JSON. When set, it overrides dataset_dir scanning.",
     )
     parser.add_argument(
         "--real-tapex", action="store_true",
@@ -299,4 +348,5 @@ if __name__ == "__main__":
         out_record=args.out_record,
         backend_name=backend_name,
         tapex=tapex_instance,
+        manifest_path=args.manifest,
     )

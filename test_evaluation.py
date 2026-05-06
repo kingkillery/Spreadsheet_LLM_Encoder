@@ -1,7 +1,14 @@
-import os
 import json
+import os
 import unittest
-from evaluation import load_spreadsheet_dataset, load_qa_dataset, range_to_bbox
+from evaluation import (
+    load_spreadsheet_dataset,
+    load_table_detection_manifest,
+    load_qa_dataset,
+    load_qa_manifest,
+    normalize_qa_answer,
+    range_to_bbox,
+)
 
 class TestEvaluation(unittest.TestCase):
 
@@ -40,6 +47,12 @@ class TestEvaluation(unittest.TestCase):
         self.assertEqual(range_to_bbox("A1:B2"), (1, 1, 2, 2))
         self.assertEqual(range_to_bbox("C5:C5"), (5, 3, 5, 3))
 
+    def test_normalize_qa_answer_by_type(self):
+        self.assertEqual(normalize_qa_answer(" a1 ", "cell_address"), "A1")
+        self.assertEqual(normalize_qa_answer(" sum( A1 : A3 ) ", "formula"), "SUM(A1:A3)")
+        self.assertEqual(normalize_qa_answer("Total   Revenue", "free_text"), "total revenue")
+        self.assertEqual(normalize_qa_answer("  Exact Case  ", "literal"), "Exact Case")
+
     def test_load_spreadsheet_dataset(self):
         dataset = load_spreadsheet_dataset(self.test_dir)
         self.assertEqual(len(dataset), 1)
@@ -56,6 +69,52 @@ class TestEvaluation(unittest.TestCase):
         self.assertEqual(item["spreadsheet_path"], self.spreadsheet_path_qa)
         self.assertEqual(len(item["qa_pairs"]), 1)
         self.assertEqual(item["qa_pairs"][0]["question"], "Q1")
+
+    def test_load_table_detection_manifest(self):
+        manifest_path = os.path.join(self.test_dir, "td_manifest.json")
+        with open(manifest_path, "w") as f:
+            json.dump({
+                "dataset_name": "synthetic",
+                "dataset_version": "v1",
+                "split_name": "test",
+                "items": [{
+                    "spreadsheet_path": "test1.xlsx",
+                    "tables": [{"range": "A1:B2"}],
+                }],
+            }, f)
+
+        dataset = load_table_detection_manifest(manifest_path)
+
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(dataset[0]["bboxes"], [(1, 1, 2, 2)])
+        self.assertEqual(dataset[0]["dataset_name"], "synthetic")
+        self.assertEqual(dataset[0]["dataset_version"], "v1")
+        self.assertEqual(dataset[0]["split_name"], "test")
+        self.assertTrue(os.path.isabs(dataset[0]["spreadsheet_path"]))
+
+    def test_load_qa_manifest(self):
+        manifest_path = os.path.join(self.test_dir, "qa_manifest.json")
+        with open(manifest_path, "w") as f:
+            json.dump({
+                "dataset_name": "qa_synth",
+                "dataset_version": "v2",
+                "split_name": "validation",
+                "items": [{
+                    "spreadsheet_path": "test_qa.xlsx",
+                    "qa_pairs": [{
+                        "question": "Q1",
+                        "answer": "[A1]",
+                        "answer_type": "cell_address",
+                    }],
+                }],
+            }, f)
+
+        dataset = load_qa_manifest(manifest_path)
+
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(dataset[0]["dataset_name"], "qa_synth")
+        self.assertEqual(dataset[0]["split_name"], "validation")
+        self.assertEqual(dataset[0]["qa_pairs"][0]["answer_type"], "cell_address")
 
 if __name__ == '__main__':
     unittest.main()

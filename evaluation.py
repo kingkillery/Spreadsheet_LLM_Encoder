@@ -1,7 +1,7 @@
-import os
 import json
 import logging
-from typing import List, Dict, Tuple
+import os
+from typing import Any, Dict, List, Tuple
 import xml.etree.ElementTree as ET
 from openpyxl.utils import column_index_from_string, get_column_letter
 import re
@@ -9,6 +9,12 @@ import re
 logger = logging.getLogger(__name__)
 
 BBox = Tuple[int, int, int, int]
+
+
+def _resolve_manifest_path(manifest_path: str, maybe_relative: str) -> str:
+    if os.path.isabs(maybe_relative):
+        return maybe_relative
+    return os.path.abspath(os.path.join(os.path.dirname(manifest_path), maybe_relative))
 
 
 def range_to_bbox(range_str: str) -> BBox:
@@ -60,6 +66,57 @@ def load_spreadsheet_dataset(path: str) -> List[Dict[str, object]]:
                 "bboxes": bboxes,
                 "ann_path": ann_path
             })
+    return dataset
+
+
+def load_table_detection_manifest(manifest_path: str) -> List[Dict[str, object]]:
+    """Load a manifest-defined spreadsheet table-detection dataset.
+
+    Expected shape::
+
+        {
+          "dataset_name": "synthetic_v1",
+          "dataset_version": "1",
+          "split_name": "test",
+          "items": [
+            {
+              "spreadsheet_path": "book.xlsx",
+              "tables": [{"range": "A1:B2"}]
+            }
+          ]
+        }
+
+    Relative spreadsheet paths are resolved from the manifest directory.
+    """
+    with open(manifest_path, encoding="utf-8") as fh:
+        manifest: Dict[str, Any] = json.load(fh)
+
+    dataset_name = manifest.get("dataset_name", "manifest")
+    dataset_version = manifest.get("dataset_version", "unspecified")
+    split_name = manifest.get("split_name", "unspecified")
+    items = manifest.get("items")
+    if not isinstance(items, list):
+        raise ValueError("table-detection manifest must contain an items array")
+
+    dataset = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"manifest item {idx} must be an object")
+        spreadsheet_path = item.get("spreadsheet_path")
+        tables = item.get("tables", [])
+        if not spreadsheet_path:
+            raise ValueError(f"manifest item {idx} missing spreadsheet_path")
+        if not isinstance(tables, list):
+            raise ValueError(f"manifest item {idx} tables must be an array")
+        bboxes = [range_to_bbox(t["range"]) for t in tables if "range" in t]
+        dataset.append({
+            "spreadsheet_path": _resolve_manifest_path(manifest_path, spreadsheet_path),
+            "bboxes": bboxes,
+            "manifest_path": os.path.abspath(manifest_path),
+            "dataset_name": dataset_name,
+            "dataset_version": dataset_version,
+            "split_name": split_name,
+        })
     return dataset
 
 
@@ -134,6 +191,18 @@ def evaluate_detections(
     return precision, recall, f1
 
 
+def normalize_qa_answer(answer: object, answer_type: str = "literal") -> str:
+    """Normalize QA answers according to their comparison contract."""
+    text = "" if answer is None else str(answer).strip()
+    if answer_type == "cell_address":
+        return text.upper()
+    if answer_type == "formula":
+        return re.sub(r"\s+", "", text).upper()
+    if answer_type == "free_text":
+        return re.sub(r"\s+", " ", text).casefold()
+    return text
+
+
 def load_qa_dataset(path: str) -> List[Dict[str, object]]:
     """
     Load a spreadsheet QA dataset.
@@ -160,9 +229,52 @@ def load_qa_dataset(path: str) -> List[Dict[str, object]]:
                 })
     return dataset
 
+
+def load_qa_manifest(manifest_path: str) -> List[Dict[str, object]]:
+    """Load a manifest-defined spreadsheet QA dataset.
+
+    Each item must include ``spreadsheet_path`` and ``qa_pairs``. QA pairs may
+    include optional fields such as ``sheet_name``, ``table_range``, and
+    ``answer_type``; they are preserved for downstream evaluation.
+    """
+    with open(manifest_path, encoding="utf-8") as fh:
+        manifest: Dict[str, Any] = json.load(fh)
+
+    dataset_name = manifest.get("dataset_name", "manifest")
+    dataset_version = manifest.get("dataset_version", "unspecified")
+    split_name = manifest.get("split_name", "unspecified")
+    items = manifest.get("items")
+    if not isinstance(items, list):
+        raise ValueError("QA manifest must contain an items array")
+
+    dataset = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"manifest item {idx} must be an object")
+        spreadsheet_path = item.get("spreadsheet_path")
+        qa_pairs = item.get("qa_pairs", [])
+        if not spreadsheet_path:
+            raise ValueError(f"manifest item {idx} missing spreadsheet_path")
+        if not isinstance(qa_pairs, list):
+            raise ValueError(f"manifest item {idx} qa_pairs must be an array")
+        dataset.append({
+            "spreadsheet_path": _resolve_manifest_path(manifest_path, spreadsheet_path),
+            "qa_pairs": qa_pairs,
+            "manifest_path": os.path.abspath(manifest_path),
+            "dataset_name": dataset_name,
+            "dataset_version": dataset_version,
+            "split_name": split_name,
+        })
+    return dataset
+
 __all__ = [
     "load_dong2019_dataset",
+    "load_spreadsheet_dataset",
+    "load_table_detection_manifest",
     "load_qa_dataset",
+    "load_qa_manifest",
+    "range_to_bbox",
+    "normalize_qa_answer",
     "eob",
     "evaluate_detections",
 ]
