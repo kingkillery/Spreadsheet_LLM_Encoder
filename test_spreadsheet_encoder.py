@@ -10,6 +10,7 @@ from Spreadsheet_LLM_Encoder import (
     vanilla_encode,
     is_header_row,
     filter_unreasonable_candidates,
+    filter_overlapping_candidates,
 )
 
 class TestSpreadsheetEncoder(unittest.TestCase):
@@ -93,6 +94,57 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         filtered = filter_unreasonable_candidates(ws, [(1, 1, 20, 4)])
 
         self.assertEqual(filtered, [])
+
+    def test_merged_header_contributes_boundaries(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.merge_cells("A1:C1")
+        ws["A1"] = "Quarterly Revenue"
+        ws["A1"].font = Font(bold=True)
+        ws.append(["Region", "Q1", "Q2"])
+        ws.append(["West", 10, 20])
+        ws.append(["East", 30, 40])
+
+        rows, cols = find_boundary_candidates(ws)
+
+        self.assertIn(1, rows)
+        self.assertTrue(any(c in cols for c in (1, 3)))
+
+    def test_multi_table_sheet_keeps_separate_column_boundaries(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Product"
+        ws["B1"] = "Sales"
+        ws["D1"] = "Region"
+        ws["E1"] = "Cost"
+        for cell in ("A1", "B1", "D1", "E1"):
+            ws[cell].font = Font(bold=True)
+        ws["A2"] = "A"
+        ws["B2"] = 10
+        ws["D2"] = "West"
+        ws["E2"] = 4
+
+        rows, cols = find_boundary_candidates(ws)
+
+        self.assertTrue(rows)
+        self.assertIn(2, cols)
+        self.assertIn(4, cols)
+
+    def test_overlap_resolution_prefers_stronger_candidate(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for c, value in enumerate(["A", "B", "C", "D"], start=1):
+            ws.cell(row=1, column=c, value=value).font = Font(bold=True)
+        for r in range(2, 5):
+            for c in range(1, 5):
+                ws.cell(row=r, column=c, value=r * c)
+
+        filtered = filter_overlapping_candidates(
+            ws,
+            [(1, 1, 4, 4), (1, 1, 4, 3)],
+        )
+
+        self.assertEqual(filtered, [(1, 1, 4, 4)])
 
     def test_strict_skeleton_retains_homogeneous_rows(self):
         wb = openpyxl.Workbook()
