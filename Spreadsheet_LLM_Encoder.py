@@ -13,6 +13,9 @@ from openpyxl.utils import get_column_letter
 
 import sys
 
+import paper_serializers
+from tokenizer import count_tokens, DEFAULT_MODEL
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,16 +28,32 @@ def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) ->
     return original_tokens / compressed_tokens
 
 
-def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
+def spreadsheet_llm_encode(
+    excel_path,
+    output_path=None,
+    k=4,
+    vanilla=False,
+    compress_homogeneous=True,
+    data_only=True,
+    tokenizer_model=DEFAULT_MODEL,
+):
     """
     Convert an Excel file to SpreadsheetLLM format or a vanilla markdown-like format.
 
     Args:
         excel_path (str): Path to the Excel file.
         output_path (str, optional): Path to save the output. Defaults to None.
-        k (int, optional): Neighborhood distance for structural anchors. Defaults to 2.
+        k (int, optional): Neighborhood distance for structural anchors.
+            Defaults to 4 (paper's best ablation setting).
         vanilla (bool, optional): If True, produce vanilla encoding instead of compressed.
                                 Defaults to False.
+        compress_homogeneous (bool, optional): Drop fully-homogeneous rows/cols
+            after anchor extraction. Defaults to True. Set False for strict
+            paper-aligned skeleton retention.
+        data_only (bool, optional): Load cached formula values instead of formula
+            text. Defaults to True (paper expects user-visible values).
+        tokenizer_model (str, optional): Model name for tokenizer-based
+            compression metrics. Defaults to ``"gpt-4"``.
 
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
@@ -44,8 +63,9 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
-        # openpyxl is used directly so number format strings are preserved
-        workbook = openpyxl.load_workbook(excel_path, data_only=False)
+        # `data_only=True` returns cached values from formulas (paper-aligned).
+        # Number-format strings are still preserved on the cell metadata.
+        workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
         logger.info(
             f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
         )
@@ -74,14 +94,12 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
         # print memory usage
         logger.info(f"Estimated memory usage: {sys.getsizeof(sheet)} bytes")
 
-        # --- gather original tokens before any compression ---
-        original_cells = {}
-        for r in range(1, sheet.max_row + 1):
-            for c in range(1, sheet.max_column + 1):
-                cell_value = sheet.cell(row=r, column=c).value
-                if cell_value is not None:
-                    original_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
-        original_tokens = len(json.dumps(original_cells, ensure_ascii=False))
+        # --- gather original tokens via the paper's vanilla prompt format ---
+        # The paper baseline encodes every cell (including empty ones) in the
+        # bounding box as ``A1,value|...`` row-major pairs, then counts tokens
+        # with the model tokenizer.
+        vanilla_prompt = paper_serializers.to_paper_vanilla_prompt(sheet)
+        original_tokens = count_tokens(vanilla_prompt, model=tokenizer_model)
 
         row_anchors, col_anchors = find_structural_anchors(sheet, k)
         logger.info(
@@ -90,17 +108,24 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
 
         kept_rows, kept_cols = extract_cells_near_anchors(sheet, row_anchors, col_anchors, 0)
 
-        # Compress homogeneous regions before indexing
-        kept_rows, kept_cols = compress_homogeneous_regions(sheet, kept_rows, kept_cols)
-        logger.info(f"After compression: {len(kept_rows)} rows and {len(kept_cols)} columns kept")
+        if compress_homogeneous:
+            kept_rows, kept_cols = compress_homogeneous_regions(sheet, kept_rows, kept_cols)
+            logger.info(
+                f"After compression: {len(kept_rows)} rows and {len(kept_cols)} columns kept"
+            )
 
-        anchor_cells = {}
+        # Anchor-stage tokens: the vanilla pair-string restricted to retained
+        # rows/cols. Empty cells inside the retained skeleton are still emitted
+        # so the count is comparable to the paper's vanilla baseline.
+        anchor_parts = []
         for r in kept_rows:
             for c in kept_cols:
-                cell_value = sheet.cell(row=r, column=c).value
-                if cell_value is not None:
-                    anchor_cells[f"{get_column_letter(c)}{r}"] = str(cell_value)
-        anchor_tokens = len(json.dumps(anchor_cells, ensure_ascii=False))
+                ref = f"{get_column_letter(c)}{r}"
+                val = sheet.cell(row=r, column=c).value
+                text = "" if val is None else str(val).replace("|", " ").replace("\n", " ")
+                anchor_parts.append(f"{ref},{text}")
+        anchor_prompt = "|".join(anchor_parts)
+        anchor_tokens = count_tokens(anchor_prompt, model=tokenizer_model)
 
         inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
         logger.info(
@@ -111,7 +136,11 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
         logger.info(
             f"Merged values into {len(merged_index)} range groups"
         )
-        index_tokens = len(json.dumps(merged_index, ensure_ascii=False))
+        # Inverted-index stage tokens: rendered as paper tuples
+        # ``(value|range)`` (no format substitution yet).
+        index_only_encoding = {"cells": merged_index, "formats": {}}
+        index_prompt = paper_serializers.to_paper_compressed_prompt(index_only_encoding)
+        index_tokens = count_tokens(index_prompt, model=tokenizer_model)
 
         # Create a map from a semantic key to cell references for aggregation
         type_nfs_map = defaultdict(list)
@@ -130,7 +159,6 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
         logger.info(
             f"Aggregated {len(aggregated_formats)} format regions"
         )
-        format_tokens = len(json.dumps(aggregated_formats, ensure_ascii=False))
 
         numeric_map = {
             fmt: cells
@@ -140,6 +168,12 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
         numeric_ranges = aggregate_regions_dfs(sheet, numeric_map)
         logger.info(f"Clustered {len(numeric_ranges)} numeric format ranges")
 
+        # Coordinate remapping (paper Section 3.3.1): retained rows/cols are
+        # remapped to a continuous compact grid so the LLM sees A1, A2, … with
+        # no gaps. The inverse map lets predicted compact ranges round-trip
+        # back to original workbook addresses.
+        coord_map = paper_serializers.build_coord_map(kept_rows, kept_cols)
+
         sheet_encoding = {
             "structural_anchors": {
                 "rows": row_anchors,
@@ -147,10 +181,20 @@ def spreadsheet_llm_encode(excel_path, output_path=None, k=2, vanilla=False):
             },
             "cells": merged_index,
             "formats": aggregated_formats,
-            "numeric_ranges": numeric_ranges
+            "numeric_ranges": numeric_ranges,
+            "coord_map": coord_map,
         }
 
-        final_tokens = len(json.dumps(sheet_encoding, ensure_ascii=False))
+        # Final stage tokens: the paper-faithful compressed prompt with format
+        # substitution and compact-coordinate remapping applied.
+        final_prompt = paper_serializers.to_paper_compressed_prompt(
+            sheet_encoding, coord_map=coord_map
+        )
+        format_tokens = count_tokens(
+            paper_serializers.to_paper_compressed_prompt(sheet_encoding),
+            model=tokenizer_model,
+        )
+        final_tokens = count_tokens(final_prompt, model=tokenizer_model)
 
         ratio_anchor = calculate_compression_ratio(original_tokens, anchor_tokens)
         ratio_index = calculate_compression_ratio(original_tokens, index_tokens)
@@ -432,72 +476,15 @@ def extract_k_neighborhood(indices, k, max_index):
     return sorted(expanded)
 
 
-def find_structural_anchors(sheet, k=2):
-    """Find structural anchors using boundary candidates and k-neighborhood."""
+def find_structural_anchors(sheet, k=4):
+    """Find structural anchors using boundary candidates and k-neighborhood.
+
+    Default ``k=4`` matches the paper's best ablation setting (Section 3.3.1).
+    """
     row_candidates, col_candidates = find_boundary_candidates(sheet)
     row_anchors = extract_k_neighborhood(row_candidates, k, sheet.max_row)
     col_anchors = extract_k_neighborhood(col_candidates, k, sheet.max_column)
     return row_anchors, col_anchors
-
-
-def get_cell_format_key(cell):
-    """Helper function to create a consistent format key for a cell."""
-    format_info = {}
-    try:
-        # 1. Font Styles
-        font = cell.font
-        format_info["font"] = {
-            "bold": font.bold,
-            "italic": font.italic,
-            "underline": font.underline,
-            "name": font.name,
-            "size": font.sz,
-            "color": str(font.color.rgb) if font.color and font.color.rgb else None,  # Get RGB color
-        }
-
-        # 2. Alignment
-        alignment = cell.alignment
-        format_info["alignment"] = {
-            "horizontal": alignment.horizontal,
-            "vertical": alignment.vertical,
-        }
-
-        # 3. Borders
-        border = cell.border
-        format_info["border"] = {
-            side: {
-                "style": getattr(border, side).style,
-                "color": (
-                    str(getattr(border, side).color.rgb)
-                    if getattr(border, side).color and getattr(border, side).color.rgb
-                    else None
-                ),
-            }
-            for side in ["left", "right", "top", "bottom"]
-        }
-
-        # 4. Fill (Background Color)
-        fill = cell.fill
-        if hasattr(fill, 'patternType') and fill.patternType == "solid":
-            format_info["fill"] = {"color": str(fill.start_color.index)
-                                   if fill.start_color and fill.start_color.index else None}
-        else:
-            format_info["fill"] = {"color": None}
-
-        # 5. Number Format (Original, Inferred Type, Category)
-        original_number_format = cell.number_format
-        inferred_type = infer_cell_data_type(cell)  # Call new helper
-        category = categorize_number_format(original_number_format, inferred_type)  # Call new helper
-
-        format_info["original_number_format"] = original_number_format
-        format_info["inferred_data_type"] = inferred_type
-        format_info["number_format_category"] = category
-        # format_info["number_format"] = cell.number_format # Keep original for now, or decide if it's redundant
-    except Exception as e:
-        # If there's an error extracting format, use a simplified format key
-        format_info = {"error": str(e)}
-
-    return json.dumps(format_info, sort_keys=True)
 
 
 def extract_cells_near_anchors(sheet, row_anchors, col_anchors, k):
@@ -718,73 +705,13 @@ def create_inverted_index_translation(inverted_index):
 
 
 def aggregate_regions_dfs(sheet, format_map):
-    """Aggregate cells with the same inferred type and number format string."""
-    aggregated_formats = defaultdict(list)
-    processed_cells = set()
+    """Aggregate connected cells by semantic key using DFS.
 
-    type_nfs_map = defaultdict(list)
-    for _, cells in format_map.items():
-        for cell_ref in cells:
-            try:
-                cell = sheet[cell_ref]
-            except Exception:
-                continue
-            nfs = get_number_format_string(cell)
-            sem_type = detect_semantic_type(cell)
-            key = json.dumps({"type": sem_type, "nfs": nfs}, sort_keys=True)
-            type_nfs_map[key].append(cell_ref)
-
-    for key, cells in type_nfs_map.items():
-        cells_set = set(cells)
-        for start_cell in cells:
-            if start_cell in processed_cells:
-                continue
-
-            try:
-                start_col_letter, start_row = split_cell_ref(start_cell)
-                start_col = openpyxl.utils.cell.column_index_from_string(start_col_letter)
-            except Exception:
-                continue
-
-            best_width = 1
-            best_height = 1
-            best_area = 1
-            best_end_cell = start_cell
-
-            max_width = min(20, sheet.max_column - start_col + 1)
-            max_height = min(20, sheet.max_row - start_row + 1)
-
-            for width in range(1, max_width + 1):
-                for height in range(1, max_height + 1):
-                    valid_rectangle = True
-                    for r in range(start_row, start_row + height):
-                        for c in range(start_col, start_col + width):
-                            cell_ref = f"{get_column_letter(c)}{r}"
-                            if cell_ref not in cells_set or cell_ref in processed_cells:
-                                valid_rectangle = False
-                                break
-                        if not valid_rectangle:
-                            break
-
-                    if valid_rectangle:
-                        area = width * height
-                        if area > best_area:
-                            best_width = width
-                            best_height = height
-                            best_area = area
-                            best_end_cell = f"{get_column_letter(start_col + width - 1)}{start_row + height - 1}"
-
-            region = start_cell if best_width == 1 and best_height == 1 else f"{start_cell}:{best_end_cell}"
-            aggregated_formats[key].append(region)
-            for r in range(start_row, start_row + best_height):
-                for c in range(start_col, start_col + best_width):
-                    processed_cells.add(f"{get_column_letter(c)}{r}")
-
-    return dict(aggregated_formats)
-
-
-def aggregate_regions_dfs(sheet, format_map):
-    """Aggregate connected cells by semantic key using DFS."""
+    Implements Algorithm 1 from Appendix M.1: for each ``{type, nfs}`` group,
+    find 4-connected components in the address grid and emit each component
+    as one or more rectangle ranges. Rows that share an identical column band
+    with the previous row are merged vertically.
+    """
     aggregated_regions = {}
 
     for key, cells in format_map.items():
@@ -870,36 +797,6 @@ def aggregate_regions_dfs(sheet, format_map):
     return aggregated_regions
 
 
-def cluster_numeric_ranges(sheet, format_map):
-    """Aggregate numeric cells with identical formatting into ranges."""
-    numeric_map = {
-        fmt: cells
-        for fmt, cells in format_map.items()
-        if json.loads(fmt).get("inferred_data_type") == "numeric"
-    }
-
-    if not numeric_map:
-        # Fall back to scanning the entire sheet when no anchors were
-        # retained and format_map is empty. This ensures numeric ranges are
-        # still detected for simple numeric sheets.
-        for r in range(1, sheet.max_row + 1):
-            for c in range(1, sheet.max_column + 1):
-                cell = sheet.cell(row=r, column=c)
-                if infer_cell_data_type(cell) == "numeric":
-                    fmt_key = json.dumps(
-                        {
-                            "type": detect_semantic_type(cell),
-                            "nfs": get_number_format_string(cell),
-                        },
-                        sort_keys=True,
-                    )
-                    numeric_map.setdefault(fmt_key, []).append(
-                        f"{get_column_letter(c)}{r}"
-                    )
-
-    return aggregate_regions_dfs(sheet, numeric_map)
-
-
 def get_column_index(col_letter):
     """Convert column letter to index (A => 1, AA => 27)."""
     return openpyxl.utils.cell.column_index_from_string(col_letter)
@@ -931,13 +828,23 @@ def main():
     parser.add_argument(
         "--k",
         type=int,
-        default=2,
-        help="Neighborhood distance parameter (default: 2)",
+        default=4,
+        help="Neighborhood distance parameter (default: 4, paper's best ablation).",
     )
     parser.add_argument(
         "--vanilla",
         action="store_true",
         help="Produce vanilla markdown-like encoding instead of compressed JSON.",
+    )
+    parser.add_argument(
+        "--no-compress-homogeneous",
+        action="store_true",
+        help="Skip the homogeneous-row/col compression step (paper-strict skeleton).",
+    )
+    parser.add_argument(
+        "--tokenizer-model",
+        default=DEFAULT_MODEL,
+        help=f"Model name passed to tiktoken for token counts (default: {DEFAULT_MODEL}).",
     )
 
     args = parser.parse_args()
@@ -948,7 +855,14 @@ def main():
         else:
             args.output = os.path.splitext(args.excel_file)[0] + "_spreadsheetllm.json"
 
-    result = spreadsheet_llm_encode(args.excel_file, args.output, args.k, args.vanilla)
+    result = spreadsheet_llm_encode(
+        args.excel_file,
+        args.output,
+        k=args.k,
+        vanilla=args.vanilla,
+        compress_homogeneous=not args.no_compress_homogeneous,
+        tokenizer_model=args.tokenizer_model,
+    )
 
     if result is not None and not args.vanilla:
         metrics = result.get("compression_metrics", {})
@@ -965,8 +879,12 @@ def main():
 
 
 def vanilla_encode(excel_path, output_path=None):
-    """
-    Produces a simple vanilla markdown-like encoding of a spreadsheet.
+    """Vanilla markdown-like encoding (paper Section 3.1).
+
+    Produces a ``{sheet_name: pair_string}`` dict where each sheet is the
+    paper's row-major ``A1,value|A2,value|...`` baseline. When written to
+    disk, all sheets are emitted under ``# {sheet_name}`` headers so
+    multi-sheet workbooks aren't silently truncated.
     """
     logger.info(f"Producing vanilla encoding for {excel_path}")
     try:
@@ -975,25 +893,18 @@ def vanilla_encode(excel_path, output_path=None):
         logger.error(f"Error loading Excel file for vanilla encoding: {e}")
         return None
 
-    vanilla_content = {}
-    for sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
-        sheet_str = []
-        for r in range(1, sheet.max_row + 1):
-            row_str = []
-            for c in range(1, sheet.max_column + 1):
-                cell = sheet.cell(row=r, column=c)
-                cell_ref = f"{get_column_letter(c)}{r}"
-                cell_val = str(cell.value) if cell.value is not None else ""
-                row_str.append(f"{cell_ref},{cell_val}")
-            sheet_str.append("|".join(row_str))
-        vanilla_content[sheet_name] = "\n".join(sheet_str)
+    vanilla_content = {
+        sheet_name: paper_serializers.to_paper_vanilla_prompt(workbook[sheet_name])
+        for sheet_name in workbook.sheetnames
+    }
 
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
-            # For simplicity, we'll save the first sheet's content if there are multiple
-            first_sheet_name = next(iter(vanilla_content))
-            f.write(vanilla_content[first_sheet_name])
+            for i, (sheet_name, content) in enumerate(vanilla_content.items()):
+                if i:
+                    f.write("\n\n")
+                f.write(f"# {sheet_name}\n")
+                f.write(content)
         logger.info(f"Saved vanilla encoding to {output_path}")
 
     return vanilla_content

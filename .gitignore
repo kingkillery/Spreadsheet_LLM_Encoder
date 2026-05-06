@@ -27,3 +27,10 @@ coverage.xml
 
 # Generated JSON files from SpreadsheetLLM encoder
 *_spreadsheetllm.json
+
+# OMC orchestration state (machine-local; not source)
+.omc/
+
+# Per-session agent state (machine-local; project skills are committed
+# explicitly from .claude/skills/, not via .claude/scheduled_tasks.lock)
+.claude/scheduled_tasks.lock

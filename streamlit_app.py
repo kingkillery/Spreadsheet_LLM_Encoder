@@ -51,7 +51,7 @@ def main():
     st.title("Spreadsheet to Encoded JSON")
     st.write("Upload your spreadsheet file (Excel or CSV) and get JSON in return.")
 
-    k_value = st.slider("Neighborhood distance (k)", min_value=0, max_value=10, value=2, step=1)
+    k_value = st.slider("Neighborhood distance (k)", min_value=0, max_value=10, value=4, step=1)
     uploaded_file = st.file_uploader("Choose a spreadsheet file", type=["xlsx", "xls", "csv"])
 
     if uploaded_file is not None:

@@ -35,22 +35,29 @@ Required dependencies:
 - pandas
 - openpyxl
 
+Recommended optional dependencies:
+- `tiktoken` — for paper-aligned compression metrics (char/4 fallback used if unavailable)
+- `openai` — to use `OpenAIBackend` in the Chain-of-Spreadsheet pipeline
+
 ## Usage
 
 ### Command Line Interface
 
 ```bash
-python Spreadsheet_LLM_Encoder.py path/to/your/spreadsheet.xlsx --output output.json --k 2
+python Spreadsheet_LLM_Encoder.py path/to/your/spreadsheet.xlsx --output output.json --k 4
 
 # Or install and use the CLI entry point
 pip install -e .
-spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --output output.json --k 2
+spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --output output.json --k 4
 ```
 
 Parameters:
 - `excel_file`: Path to the Excel file you want to encode (required)
 - `--output`, `-o`: Path to save the JSON output (optional, defaults to input filename with '_spreadsheetllm.json' suffix)
-- `--k`: Neighborhood distance parameter for structural anchors (optional, default=2)
+- `--k`: Neighborhood distance parameter for structural anchors (optional, default=4, paper's best ablation)
+- `--vanilla`: Produce vanilla pair-string encoding instead of compressed (optional)
+- `--no-compress-homogeneous`: Retain all structural-anchor cells without pruning homogeneous rows/columns (optional)
+- `--tokenizer-model`: Model name for tokenizer-based compression metrics (optional, default="gpt-4")
 
 The CLI prints compression ratios for each sheet and overall to stdout. These metrics are also stored in the output JSON under `compression_metrics` and emitted via the logger at INFO level.
 
@@ -59,14 +66,22 @@ The CLI prints compression ratios for each sheet and overall to stdout. These me
 ```python
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 
-# Basic usage
+# Basic usage (default k=4, paper's best ablation)
 encoding = spreadsheet_llm_encode("path/to/your/spreadsheet.xlsx")
 
-# With custom output path and neighborhood parameter
+# With custom output path and tokenizer
 encoding = spreadsheet_llm_encode(
     excel_path="path/to/your/spreadsheet.xlsx", 
     output_path="output.json",
-    k=3
+    k=4,
+    tokenizer_model="gpt-4"
+)
+
+# Vanilla encoding (pair-string format)
+encoding = spreadsheet_llm_encode(
+    excel_path="path/to/your/spreadsheet.xlsx",
+    vanilla=True,
+    output_path="vanilla.txt"
 )
 ```
 
@@ -75,23 +90,29 @@ encoding = spreadsheet_llm_encode(
 
 The module `chain_of_spreadsheet.py` implements the **Chain of Spreadsheet (CoS)** pipeline structure from the paper, broken into the following stages:
 
-1.  **Table Identification**: Given a query, the system first identifies the most relevant sheet and then calls an LLM to determine the precise boundaries of the table within that sheet that contains the answer.
-2.  **Response Generation**: The compressed sheet encoding is passed to the LLM along with the original query to generate a final response.  Note that, unlike the paper (Section 4.2), this implementation feeds the **already-compressed** representation rather than an uncompressed re-encoding of the identified sub-range; a fully-faithful implementation would require access to the original file.
-3.  **Table Splitting for Large Tables**: For tables that exceed the LLM's context window the pipeline falls back to the **Table Split QA Algorithm** (Appendix M.2).  The current implementation is a **simplified placeholder**: it does not actually split the table into row-based chunks — it passes the same data for every sub-query.  A production implementation must partition the body rows so that each chunk fits within `token_limit`.
+1.  **Table Identification (Stage 1)**: Given a query, the system identifies the most relevant sheet (via `find_relevant_sheet`) and calls an LLM to determine the precise boundaries of the table within that sheet (via `identify_table`).
+2.  **Response Generation (Stage 2)**: With `workbook_path`, `sheet_name`, and `table_range` provided, the paper-faithful **uncompressed pair-string** is read directly from the original workbook and passed to the LLM along with the query. Without those parameters, it falls back to the compressed encoding with a deprecation warning.
+3.  **Table Splitting for Large Tables (Algorithm 2)**: For tables exceeding `token_limit`, `table_split_qa` performs real **body-row chunking**: it greedily partitions rows so each `header + chunk` pair fits within the token limit (measured by `tokenizer.count_tokens`), then calls the LLM per chunk and aggregates answers.
 
-> **Important – LLM integration required**: `chain_of_spreadsheet.py` does **not** ship with a built-in LLM client.  The internal `_call_llm()` function raises `NotImplementedError` by default.  Before using the CoS pipeline you must supply your own LLM backend:
->
-> ```python
-> import chain_of_spreadsheet as cos
->
-> def my_llm(prompt: str) -> str:
->     # e.g. call OpenAI, Anthropic, or a local model
->     ...
->
-> cos._call_llm = my_llm
-> ```
+### Configuring an LLM Backend
 
-The `example_chain_usage.py` script demonstrates how to use this pipeline once an LLM backend is configured.
+Configure via `configure_backend()` (preferred) or monkey-patch `_call_llm`:
+
+```python
+import chain_of_spreadsheet as cos
+from llm_backend import OpenAIBackend, EchoBackend
+
+# Option 1: use OpenAIBackend
+cos.configure_backend(OpenAIBackend(model="gpt-4o-mini"))
+
+# Option 2: use EchoBackend for testing
+cos.configure_backend(EchoBackend(response="['range': 'A1:B5']"))
+
+# Option 3: monkey-patch (legacy, still supported)
+cos._call_llm = lambda p: my_llm_client.complete(p)
+```
+
+The `example_chain_usage.py` script demonstrates end-to-end usage with a real LLM backend.
 
 ## How It Works: The `SheetCompressor`
 
@@ -141,31 +162,51 @@ The encoder produces a JSON with this structure:
       },
       "numeric_ranges": {
         "{format_definition}": ["B2:B8"]
+      },
+      "coord_map": {
+        "rows": {1: 1, 5: 2, 10: 3},
+        "cols": {1: 1, 3: 2, 6: 3},
+        "rows_inv": {1: 1, 2: 5, 3: 10},
+        "cols_inv": {1: 1, 2: 3, 3: 6}
       }
     }
   }
 }
 ```
 
+The `coord_map` field enables round-trip conversion between original workbook coordinates and the compact remapped space used in the paper-faithful prompts.
+
 ### Compression Metrics
 
-The encoder reports token counts before and after each stage. These values are stored under `compression_metrics` in the JSON output. Example:
+The encoder reports token counts before and after each stage using `tokenizer.count_tokens`, which uses **tiktoken** when available and falls back to a deterministic **char/4** approximation. These metrics are stored under `compression_metrics` in the JSON output:
 
 ```json
 "compression_metrics": {
   "overall": {
-    "overall_ratio": 3.5
+    "original_tokens": 1200,
+    "after_anchor_tokens": 400,
+    "after_inverted_index_tokens": 320,
+    "after_format_tokens": 350,
+    "final_tokens": 340,
+    "anchor_ratio": 3.0,
+    "inverted_index_ratio": 3.75,
+    "format_ratio": 3.43,
+    "overall_ratio": 3.53
   },
   "sheets": {
     "Sheet1": {
-      "anchor_ratio": 2.1,
-      "inverted_index_ratio": 3.0,
-      "format_ratio": 3.4,
-      "overall_ratio": 3.5
+      "original_tokens": 1200,
+      "after_anchor_tokens": 400,
+      "anchor_ratio": 3.0,
+      "inverted_index_ratio": 3.75,
+      "format_ratio": 3.43,
+      "overall_ratio": 3.53
     }
   }
 }
 ```
+
+The baseline (`original_tokens`) uses the paper's vanilla pair-string format (including empty cells in the bounding box), not non-empty JSON cells. Install `tiktoken` for metrics aligned with the paper's reported numbers.
 
 ## Evaluation
 
@@ -182,13 +223,68 @@ The repository now includes a comprehensive framework for evaluating Spreadsheet
 -   **Dataset**: A new data loader `load_qa_dataset` is included for the Spreadsheet QA benchmark described in Appendix H of the paper.
 -   **Evaluation Script**: The `run_qa_evaluation.py` script evaluates the performance of the full CoS pipeline on the QA task. It calculates the accuracy of the generated answers and includes placeholders for running baseline models like `TaPEx` and `Binder`.
 
+## Paper-faithful Prompts
+
+The `paper_serializers` module exports three canonical prompt formats aligned with the paper (arXiv:2407.09025):
+
+**Vanilla pair-string (Section 3.1, Stage 2):**
+```python
+from paper_serializers import to_paper_vanilla_prompt
+import openpyxl
+
+wb = openpyxl.load_workbook("data.xlsx", data_only=True)
+prompt = to_paper_vanilla_prompt(wb["Sheet1"])
+# Output: "A1,Year|A2,2020|A3,2021|B1,Profit|B2,100|B3,150"
+```
+
+**Compressed pair-string with format substitution (Stage 1):**
+```python
+from paper_serializers import to_paper_compressed_prompt
+
+sheet_data = encoding["sheets"]["Sheet1"]
+prompt = to_paper_compressed_prompt(sheet_data, coord_map=sheet_data.get("coord_map"))
+# Output: "(Year|A1)(IntNum|A2:A3)(Profit|B1)(IntNum|B2:B3)"
+```
+
+**Stage 2 uncompressed sub-range (paper-faithful, requires original workbook):**
+```python
+from paper_serializers import to_stage2_uncompressed_prompt
+
+prompt = to_stage2_uncompressed_prompt(
+    workbook_path="data.xlsx",
+    sheet_name="Sheet1",
+    table_range="A1:B3"
+)
+# Output: "A1,Year|A2,2020|A3,2021|B1,Profit|B2,100|B3,150"
+```
+
 ## Vanilla Encoding
 
-For baseline comparisons and debugging, the encoder can produce a simple "vanilla" markdown-like encoding (as described in Section 3.1 of the paper). Use the `--vanilla` flag in the CLI:
+For baseline comparisons and debugging, the encoder can produce a simple "vanilla" pair-string encoding (as described in Section 3.1 of the paper). Use the `--vanilla` flag in the CLI:
 
 ```bash
 spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --vanilla --output output.txt
 ```
+
+The vanilla encoding includes **all sheets** in the workbook, each preceded by a sheet-name header (`# {sheet_name}`), in row-major order.
+
+## Gap Analysis Remediation
+
+This section documents changes made to align the implementation with the paper (arXiv:2407.09025):
+
+- **Default k**: Changed from 2 to 4 (paper's best ablation; see Appendix E).
+- **Real Stage 2**: `generate_response` now reads the original workbook and emits the uncompressed pair-string for identified sub-ranges (Section 4.2), not the compressed encoding. Call with `workbook_path`, `sheet_name`, and `table_range` for paper-faithful behavior.
+- **Real Algorithm 2**: `table_split_qa` now performs actual body-row chunking (Appendix M.2), partitioning rows greedily so each `header + chunk` fits the token limit.
+- **Tokenizer-based metrics**: Compression ratios now use `tiktoken` (when available) instead of character counts, matching the paper's reported numbers. Fallback to char/4 when tiktoken is unavailable.
+- **Format-region substitution**: In the compressed prompt, compressible types (integer, float, date, datetime, time, year, email, scientific notation, percentage, currency) are substituted with semantic labels (`IntNum`, `FloatNum`, `DateData`, etc.) in the rendered prompt.
+- **Coordinate remapping**: Each sheet encoding now includes a `coord_map` field mapping original↔compact coordinates, enabling round-trip conversion between predicted compact ranges and original workbook addresses.
+- **Paper serializers**: New `paper_serializers` module exports `to_paper_vanilla_prompt`, `to_paper_compressed_prompt`, and `to_stage2_uncompressed_prompt` for faithful prompt generation.
+- **LLM backend abstraction**: `chain_of_spreadsheet.configure_backend(backend)` accepts any `LLMBackend` (any `Callable[[str], str]`). Reference implementations provided: `OpenAIBackend`, `EchoBackend`.
+
+**Not yet implemented** (per the original paper):
+- Paper datasets are not bundled.
+- TaPEx and Binder baseline comparisons remain placeholder stubs.
+- Fine-tuning training loop is not included (data preparation only).
 
 ## Research Background
 

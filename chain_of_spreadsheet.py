@@ -2,47 +2,70 @@
 Chain of Spreadsheet (CoS) methodology for SpreadsheetLLM.
 Implements the CoS pipeline structure as described in arXiv:2407.09025.
 
-NOTE: This module does NOT include a built-in LLM integration.  Before calling
-any CoS function you MUST supply a real LLM backend by reassigning
-``chain_of_spreadsheet._call_llm``.  Example::
+Configure an LLM backend via :func:`configure_backend` (preferred) or by
+monkey-patching ``chain_of_spreadsheet._call_llm``. Example::
 
     import chain_of_spreadsheet as cos
+    from llm_backend import OpenAIBackend
 
-    def my_llm(prompt: str) -> str:
-        # call OpenAI / Anthropic / local model here
-        ...
+    cos.configure_backend(OpenAIBackend(model="gpt-4o-mini"))
 
-    cos._call_llm = my_llm
+Or, equivalently::
+
+    cos._call_llm = lambda p: my_llm_client.complete(p)
 """
-from typing import Dict, Optional, Tuple
+from __future__ import annotations
+
 import json
 import logging
 import re
+from typing import Dict, Iterable, List, Optional, Sequence
+
+import paper_serializers
+from llm_backend import LLMBackend  # noqa: F401  (re-exported for typing)
+from tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
 
-# --- LLM backend hook ---
-# Replace this function with a real LLM call before using the CoS pipeline.
-# See the module docstring for an example.
-def _call_llm(prompt: str) -> str:
-    """Placeholder that raises ``NotImplementedError``.
+# --- LLM backend hook --------------------------------------------------------
 
-    Assign a callable to ``chain_of_spreadsheet._call_llm`` that accepts a
-    prompt string (``str``) and returns the LLM's text response (``str``).
-    Example::
+_BACKEND: Optional[LLMBackend] = None
 
-        import chain_of_spreadsheet as cos
-        cos._call_llm = lambda p: my_llm_client.complete(p)
+
+def configure_backend(backend: Optional[LLMBackend]) -> None:
+    """Register an :class:`LLMBackend` (or any ``Callable[[str], str]``).
+
+    Pass ``None`` to clear the registered backend.
     """
+    global _BACKEND
+    _BACKEND = backend
+
+
+def _call_llm(prompt: str) -> str:
+    """Dispatch ``prompt`` to the configured backend.
+
+    Returns ``_BACKEND(prompt)`` if a backend has been configured via
+    :func:`configure_backend`; otherwise raises ``NotImplementedError``.
+
+    Tests typically monkey-patch this function directly
+    (e.g. ``chain_of_spreadsheet._call_llm = lambda p: ...``); when patched
+    the backend mechanism is bypassed entirely.
+    """
+    if _BACKEND is not None:
+        return _BACKEND(prompt)
     raise NotImplementedError(
         "_call_llm is a placeholder and has not been configured. "
         "Assign a real LLM callable before using the CoS pipeline:\n\n"
         "    import chain_of_spreadsheet as cos\n"
         "    cos._call_llm = lambda prompt: my_llm_client.complete(prompt)\n"
+        "\nor:\n\n"
+        "    from llm_backend import OpenAIBackend\n"
+        "    cos.configure_backend(OpenAIBackend())\n"
     )
 
-# --- Prompt Templates from Appendix L.3 ---
+
+# --- Prompt Templates from Appendix L.3 -------------------------------------
 
 QA_STAGE1_PROMPT_TEMPLATE = """
 INSTRUCTION:
@@ -62,41 +85,80 @@ INPUT:
 [Question]
 """
 
-def identify_table(encoding: Dict, query: str) -> Optional[str]:
+
+# --- Internal helpers --------------------------------------------------------
+
+# Match ranges in either single or double quotes — LLMs use both freely.
+_RANGE_RE = re.compile(r"""['"]([A-Z]+\d+:[A-Z]+\d+)['"]""")
+_STAGE2_LEGACY_WARNED = False
+
+
+def _build_stage2_prompt(prompt_input: str, query: str) -> str:
+    prompt = QA_STAGE2_PROMPT_TEMPLATE.replace(
+        "[Encoded Spreadsheet without compression]", prompt_input
+    )
+    return prompt.replace("[Question]", query)
+
+
+# --- Stage 1 -----------------------------------------------------------------
+
+def identify_table(
+    encoding: Dict,
+    query: str,
+    sheet_name: Optional[str] = None,
+) -> Optional[str]:
+    """Identify the most relevant table for ``query`` (CoS Stage 1).
+
+    Builds a paper-faithful compressed prompt from the selected sheet, calls
+    the LLM, and parses the returned range.
     """
-    Identifies the most relevant table for a query using an LLM.
-    (CoS Stage 1)
-    """
-    sheet_name = find_relevant_sheet(encoding, query)
+    if sheet_name is None:
+        sheet_name = find_relevant_sheet(encoding, query)
     if not sheet_name:
         logger.warning("Could not identify a relevant sheet for the query.")
         return None
 
-    compressed_sheet_data = encoding["sheets"][sheet_name]
+    sheets = encoding.get("sheets", {})
+    if sheet_name not in sheets:
+        logger.warning("Sheet '%s' not present in encoding.", sheet_name)
+        return None
+    sheet_data = sheets[sheet_name]
 
-    # Format the compressed data for the prompt
-    prompt_input = json.dumps(compressed_sheet_data, ensure_ascii=False)
+    prompt_input = paper_serializers.to_paper_compressed_prompt(
+        sheet_data,
+        coord_map=sheet_data.get("coord_map"),
+    )
 
-    prompt = QA_STAGE1_PROMPT_TEMPLATE.replace("[Encoded Spreadsheet with compression]", prompt_input)
+    prompt = QA_STAGE1_PROMPT_TEMPLATE.replace(
+        "[Encoded Spreadsheet with compression]", prompt_input
+    )
     prompt = prompt.replace("[Question]", query)
 
     llm_response = _call_llm(prompt)
 
-    # Parse the response to get the table range
-    match = re.search(r"\'([A-Z]+\d+:[A-Z]+\d+)\'", llm_response)
+    match = _RANGE_RE.search(llm_response)
     if match:
         return match.group(1)
 
-    logger.warning(f"Could not parse table range from LLM response: {llm_response}")
+    logger.warning("Could not parse table range from LLM response: %s", llm_response)
     return None
 
+
+# --- Sheet selection ---------------------------------------------------------
+
 def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
-    """Helper to find the most relevant sheet using simple keyword matching."""
+    """Find the most relevant sheet for ``query`` via keyword matching.
+
+    When a backend is configured AND there is no clear keyword winner across
+    multiple sheets, optionally defer to the LLM to choose. Single-sheet
+    fallback is always preserved.
+    """
     query_tokens = {t.lower() for t in query.split()}
     best_score = 0
-    best_sheet = None
+    best_sheet: Optional[str] = None
+    tied = False
 
-    for sheet_name, sheet_data in encoding.get("sheets", {}).items():
+    for name, sheet_data in encoding.get("sheets", {}).items():
         score = 0
         for value in sheet_data.get("cells", {}):
             lower_val = str(value).lower()
@@ -104,117 +166,232 @@ def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
                 score += 1
         if score > best_score:
             best_score = score
-            best_sheet = sheet_name
-    if best_sheet:
+            best_sheet = name
+            tied = False
+        elif score == best_score and score > 0:
+            tied = True
+
+    if best_sheet and not tied:
         return best_sheet
 
     sheet_names = list(encoding.get("sheets", {}))
     if len(sheet_names) == 1:
-        # Fall back to the only available sheet so the CoS flow can still run
-        # when token matching finds nothing useful or there is no competing
-        # sheet to disambiguate against.
         return sheet_names[0]
-    return None
+
+    # Optional: when ambiguous and a backend is configured, let the LLM pick.
+    if _BACKEND is not None and len(sheet_names) > 1:
+        try:
+            picked = _llm_pick_sheet(sheet_names, query)
+            if picked in sheet_names:
+                return picked
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("LLM sheet selection failed: %s", exc)
+
+    return best_sheet
+
+
+def _llm_pick_sheet(sheet_names: Sequence[str], query: str) -> Optional[str]:
+    listing = ", ".join(sheet_names)
+    prompt = (
+        "You are picking the most relevant spreadsheet tab for a question.\n"
+        f"Available sheets: {listing}\n"
+        f"Question: {query}\n"
+        "Respond with ONLY the exact sheet name and no other text."
+    )
+    answer = _call_llm(prompt).strip()
+    # Strip optional surrounding quotes
+    answer = answer.strip("'\"")
+    return answer if answer in sheet_names else None
 
 
 def _find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
-    """Deprecated wrapper; use find_relevant_sheet directly."""
+    """Deprecated wrapper; use :func:`find_relevant_sheet` directly."""
     return find_relevant_sheet(encoding, query)
 
 
-def generate_response(sheet_data: Dict, query: str) -> str:
+# --- Stage 2 -----------------------------------------------------------------
+
+def generate_response(
+    sheet_data: Dict,
+    query: str,
+    *,
+    workbook_path: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+    table_range: Optional[str] = None,
+    coord_map: Optional[Dict] = None,
+) -> str:
+    """Generate a Stage 2 response for ``query`` over the identified table.
+
+    When ``workbook_path``, ``sheet_name`` and ``table_range`` are all
+    supplied, the paper-faithful uncompressed sub-range is read directly
+    from the original workbook (Section 4.2). Compact ranges produced by
+    the encoder's coordinate remapping are unmapped first.
+
+    Otherwise the function falls back to passing the (compressed)
+    ``sheet_data`` into the prompt and emits a one-time warning that this
+    is not paper-faithful.
     """
-    Generates a response for a query using an LLM and the identified table data.
-    (CoS Stage 2)
+    global _STAGE2_LEGACY_WARNED
 
-    .. note::
-        This implementation passes the **already-compressed** sheet encoding to
-        the LLM.  The paper (Section 4.2) specifies that Stage 2 should use an
-        *uncompressed* representation of the identified table sub-range.  A
-        fully-faithful implementation would require access to the original
-        spreadsheet file in order to extract and re-encode just that sub-range
-        without compression.
-    """
-    # Uses the already-compressed encoding; see docstring note above.
-    prompt_input = json.dumps(sheet_data, ensure_ascii=False)
+    if workbook_path and sheet_name and table_range:
+        if coord_map is None:
+            coord_map = sheet_data.get("coord_map") if isinstance(sheet_data, dict) else None
 
-    prompt = QA_STAGE2_PROMPT_TEMPLATE.replace("[Encoded Spreadsheet without compression]", prompt_input)
-    prompt = prompt.replace("[Question]", query)
+        original_range = table_range
+        if coord_map:
+            unmapped = paper_serializers.unremap_range(table_range, coord_map)
+            if unmapped is not None:
+                original_range = unmapped
+            else:
+                logger.warning(
+                    "unremap_range returned None for %s; using compact range as-is.",
+                    table_range,
+                )
 
-    llm_response = _call_llm(prompt)
+        prompt_input = paper_serializers.to_stage2_uncompressed_prompt(
+            workbook_path, sheet_name, original_range
+        )
+    else:
+        if not _STAGE2_LEGACY_WARNED:
+            logger.warning(
+                "generate_response called without workbook_path/sheet_name/"
+                "table_range; using compressed encoding (paper specifies an "
+                "uncompressed sub-range for Stage 2)."
+            )
+            _STAGE2_LEGACY_WARNED = True
+        prompt_input = json.dumps(sheet_data, ensure_ascii=False)
 
-    return llm_response
+    prompt = _build_stage2_prompt(prompt_input, query)
+    return _call_llm(prompt)
 
-def _calculate_token_size(data: Dict) -> int:
-    """Placeholder to estimate token size. Replace with a real tokenizer."""
-    return len(json.dumps(data, ensure_ascii=False))
 
-def _predict_header(sheet_data: Dict, table_range: str) -> Tuple[Dict, str]:
-    """
-    Predicts the header region of a table.
-    This is a simplified version. A real implementation would need more robust logic.
-    """
-    # This is a placeholder. A real implementation would analyze the table structure.
-    # For now, we assume the first row of the table is the header.
-    # We would need access to the original sheet to do this properly.
-    # Let's assume the header is the first row of the identified table.
-    # This is a major simplification.
-    return {}, "1:1" # Placeholder: empty header data, range is row 1
-
+# --- Algorithm 2: row-chunked QA --------------------------------------------
 
 def table_split_qa(
     sheet_data: Dict,
     table_range: str,
     query: str,
-    token_limit: int = 4096
+    *,
+    workbook_path: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+    coord_map: Optional[Dict] = None,
+    token_limit: int = 4096,
+    header_rows: Optional[Iterable[int]] = None,
+    tokenizer_model: str = "gpt-4",
 ) -> str:
+    """Handle QA for large tables via Algorithm 2 (Appendix M.2) row chunking.
+
+    Real path (when ``workbook_path`` and ``sheet_name`` are provided):
+
+    1. Resolve the compact ``table_range`` to original-workbook coordinates
+       via ``coord_map`` (taken from ``sheet_data`` if not passed).
+    2. Default ``header_rows`` to ``[r1]`` if not specified.
+    3. Compute the full uncompressed prompt's token count; if it fits
+       ``token_limit``, delegate to :func:`generate_response` once.
+    4. Otherwise greedily partition body rows so each
+       ``header + chunk`` rendering fits ``token_limit`` (using
+       :func:`tokenizer.count_tokens`), guaranteeing forward progress with
+       at least one body row per chunk.
+    5. Substitute ``header + chunk`` pairs into ``QA_STAGE2_PROMPT_TEMPLATE``,
+       call :func:`_call_llm` per chunk, and aggregate.
+
+    Legacy path (no workbook info): emits a deprecation warning and calls
+    :func:`generate_response` once on the supplied ``sheet_data``.
     """
-    Handles QA for large tables by splitting them into chunks.
-    Intended to implement Algorithm 2 from Appendix M.2.
+    if not (workbook_path and sheet_name):
+        logger.warning(
+            "table_split_qa called without workbook_path/sheet_name; "
+            "row-chunking requires the original workbook. Falling back to a "
+            "single generate_response call. This legacy path is deprecated."
+        )
+        return generate_response(sheet_data, query)
 
-    .. warning::
-        This is a **simplified placeholder** implementation.  The real algorithm
-        requires access to the original spreadsheet rows in order to create
-        meaningful splits.  The current implementation:
+    if coord_map is None and isinstance(sheet_data, dict):
+        coord_map = sheet_data.get("coord_map")
 
-        * Does **not** split the table body into row-based chunks respecting
-          ``token_limit``.
-        * Passes the same (unsplit) ``sheet_data`` to every sub-query instead
-          of actual row slices.
-        * Hardcodes two "chunks" purely for structural demonstration.
+    original_range = table_range
+    if coord_map:
+        unmapped = paper_serializers.unremap_range(table_range, coord_map)
+        if unmapped is not None:
+            original_range = unmapped
+        else:
+            logger.warning(
+                "unremap_range returned None for %s; using compact range as-is.",
+                table_range,
+            )
 
-        A production implementation must extract body rows, partition them so
-        that ``header + chunk`` fits within ``token_limit``, and call
-        ``generate_response`` on each real chunk.
-    """
-    table_data = sheet_data  # In a real scenario, we'd extract the sub-table
+    r1, c1, r2, c2 = paper_serializers.parse_range(original_range)
 
-    if _calculate_token_size(table_data) <= token_limit:
-        return generate_response(table_data, query)
+    header_list: List[int] = (
+        [r1] if header_rows is None else sorted({int(r) for r in header_rows})
+    )
+    body_rows: List[int] = [r for r in range(r1, r2 + 1) if r not in header_list]
 
-    logger.info(f"Table is too large, applying Table Split QA Algorithm.")
+    full_prompt_input = paper_serializers.to_stage2_uncompressed_prompt(
+        workbook_path, sheet_name, original_range
+    )
+    full_prompt = _build_stage2_prompt(full_prompt_input, query)
 
-    header_data, header_range = _predict_header(table_data, table_range)
+    if count_tokens(full_prompt, model=tokenizer_model) <= token_limit:
+        return generate_response(
+            sheet_data,
+            query,
+            workbook_path=workbook_path,
+            sheet_name=sheet_name,
+            table_range=table_range,
+            coord_map=coord_map,
+        )
 
-    # This is highly simplified as we don't have the original sheet to get body rows.
-    # We will just pretend to split the existing data.
+    logger.info("Table is too large; applying Algorithm 2 row chunking.")
 
-    # In a real implementation:
-    # 1. Get all rows in the table body.
-    # 2. Create chunks of rows, where each chunk + header fits the token limit.
-    # 3. For each chunk, create a temporary sheet encoding.
-    # 4. Call generate_response on each chunk.
+    answers: List[str] = []
+    i = 0
+    n = len(body_rows)
+    while i < n:
+        # Always include at least one body row; greedily extend while the
+        # rendered prompt fits within token_limit.
+        chunk: List[int] = [body_rows[i]]
+        candidate_prompt = _render_chunk_prompt(
+            workbook_path, sheet_name, original_range,
+            header_list + chunk, query,
+        )
+        candidate_tokens = count_tokens(candidate_prompt, model=tokenizer_model)
+        if candidate_tokens > token_limit:
+            # Single header+row already exceeds the budget. We can't split
+            # further without losing the header context, so emit a warning
+            # and dispatch as-is rather than hang or skip silently.
+            logger.warning(
+                "Header + row %s alone is %d tokens (> token_limit=%d); "
+                "sending anyway. Consider raising token_limit or shrinking "
+                "the column band.",
+                body_rows[i], candidate_tokens, token_limit,
+            )
+        j = i + 1
+        while j < n:
+            tentative = chunk + [body_rows[j]]
+            tentative_prompt = _render_chunk_prompt(
+                workbook_path, sheet_name, original_range,
+                header_list + tentative, query,
+            )
+            if count_tokens(tentative_prompt, model=tokenizer_model) > token_limit:
+                break
+            chunk = tentative
+            candidate_prompt = tentative_prompt
+            j += 1
+        answers.append(_call_llm(candidate_prompt))
+        i = j
 
-    # Placeholder logic:
-    answers = []
-    # Pretend we split it into two chunks
-    for i in range(2):
-        logger.info(f"Querying sub-table chunk {i+1}...")
-        # In a real scenario, `chunk_data` would be `header_data` + a slice of the body
-        chunk_data = table_data
-        answer = generate_response(chunk_data, query)
-        answers.append(answer)
+    return "Aggregated answers from sub-tables:\n" + "\n".join(answers)
 
-    # Aggregate answers
-    final_answer = "Aggregated answers from sub-tables:\n" + "\n".join(answers)
-    return final_answer
+
+def _render_chunk_prompt(
+    workbook_path: str,
+    sheet_name: str,
+    original_range: str,
+    rows: Sequence[int],
+    query: str,
+) -> str:
+    pair_string = paper_serializers.stage2_pairs_from_rows(
+        workbook_path, sheet_name, original_range, rows
+    )
+    return _build_stage2_prompt(pair_string, query)
