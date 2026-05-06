@@ -186,7 +186,7 @@ class TestEndToEnd(unittest.TestCase):
         for key in (
             "timestamp", "task", "dataset_dir", "k", "backend",
             "n_questions", "spreadsheetllm_accuracy_pct",
-            "tapex_placeholder_accuracy_pct",
+            "tapex_accuracy_pct", "tapex_kind",
             "binder_placeholder_accuracy_pct",
             "baselines_are_placeholders", "per_question", "meta",
         ):
@@ -194,6 +194,8 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(record["task"], "spreadsheet_qa")
         self.assertEqual(record["k"], 4)
         self.assertEqual(record["backend"], "echo")
+        # Without --real-tapex the run uses the placeholder.
+        self.assertEqual(record["tapex_kind"], "placeholder")
         self.assertTrue(record["baselines_are_placeholders"])
         self.assertGreater(record["n_questions"], 0)
         self.assertEqual(len(record["per_question"]), record["n_questions"])

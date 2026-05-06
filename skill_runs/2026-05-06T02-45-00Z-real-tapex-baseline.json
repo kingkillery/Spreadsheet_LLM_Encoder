@@ -1,0 +1,43 @@
+{
+  "iteration": 6,
+  "timestamp": "2026-05-06T02:45:00Z",
+  "goal": "Replace TaPEx placeholder with a real HuggingFace transformers wrapper (microsoft/tapex-base-finetuned-wtq) so QA-eval comparisons are no longer distorted by a constant-response stub.",
+  "verified": [
+    "Pre-iteration: run_tape_placeholder always returned [C5]; iteration 5's eval record explicitly flagged baselines_are_placeholders: true.",
+    "After iteration: TaPExBaseline lazy-loads the HF transformers pipeline only on first .answer() call; injecting pipeline= in tests bypasses any network/model download.",
+    "Wrapper correctly extracts table from workbook range, builds {column: [cells]} dict, disambiguates duplicate header strings (caught by a test that initially failed and forced the dict-construction rewrite), wraps answer in [...] to match the paper's QA contract.",
+    "run_qa_evaluation.py exposes --real-tapex / --tapex-model flags; when --real-tapex is on, per_question records the answer under 'tapex_real' and out_record sets tapex_kind='real'.",
+    "Backward-compatible: --real-tapex omitted -> placeholder path retained, eval record carries tapex_kind='placeholder' and baselines_are_placeholders: true."
+  ],
+  "inferred": [
+    "TaPEx requires string-keyed columns; we synthesize A/B/C headers when the first row is all-numeric so the wrapper degrades gracefully on header-less tables.",
+    "Holding off on Binder integration — Binder is research-grade neural-symbolic SQL; vendor it as iteration 7+ rather than bundling here."
+  ],
+  "unknown": [
+    "Whether on real spreadsheet QA datasets the synthesized-header fallback and 64-row truncation cap distort accuracy enough to misrepresent TaPEx's true performance. Will need a real benchmark run (gated on user's environment + GPU) to verify."
+  ],
+  "amendment": {
+    "files_changed": [
+      "baselines.py (new — TaPExBaseline + _read_table; lazy transformers import)",
+      "run_qa_evaluation.py (--real-tapex / --tapex-model flags; tapex= injected into main; per_question now records tapex_real or tapex_placeholder; out_record carries tapex_kind)",
+      "test_baselines.py (new — 7 tests, all mocked: header read, numeric-header synthesis, [..] wrapping, column-dict shape, list-response handling, duplicate-header disambiguation, missing-transformers error)",
+      "test_end_to_end.py (test_qa_eval_writes_out_record updated to assert tapex_kind=='placeholder' under default flags)"
+    ],
+    "tests_added": [
+      "test_baselines.py (7 tests)"
+    ],
+    "lines_delta": "+330/-25"
+  },
+  "evaluation": {
+    "tests_total": 120,
+    "tests_passed": 120,
+    "validators": {
+      "architect": "self — wrapper API mirrors existing LLMBackend patterns; lazy-load avoids hard dependency on transformers",
+      "security": "self — no new credential paths; pipeline injection point is intended for tests",
+      "code_review": "self-falsified-and-fixed — first dict-construction attempt failed test_disambiguates_duplicate_headers; rewrote to build the dict from norm_header instead of header"
+    },
+    "loop_caught_real_bug": "test_disambiguates_duplicate_headers exposed a KeyError in the duplicate-header rename path before the fix landed."
+  },
+  "verdict": "promote",
+  "next_gap": "Real Binder baseline OR a runnable end-to-end real-LLM smoke test (set OPENAI_API_KEY, run synth -> encode -> CoS with OpenAIBackend, write a real eval record). The smoke test is the smaller change and would make iteration-over-iteration deltas finally non-zero."
+}

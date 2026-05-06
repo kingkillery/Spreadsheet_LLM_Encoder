@@ -15,13 +15,36 @@ logger = logging.getLogger(__name__)
 
 
 def run_tape_placeholder(encoding: Dict, query: str) -> str:
-    """Placeholder for TaPEx baseline.
+    """Placeholder TaPEx fallback.
 
-    # TODO: Real TaPEx baseline requires separate integration work; this is
-    # intentionally a stub flagged by the gap analysis.
+    Used when --real-tapex is off or transformers isn't installed. Real TaPEx
+    requires the workbook path and identified table range; the placeholder
+    only sees the encoding, which is why the real path is wired into ``main``
+    rather than this function.
     """
     logger.info("Running placeholder TaPEx baseline...")
     return "[C5]"  # Dummy response
+
+
+def run_tape_real(
+    tapex,  # baselines.TaPExBaseline
+    workbook_path: str,
+    sheet_name: Optional[str],
+    table_range: Optional[str],
+    query: str,
+) -> str:
+    """Invoke a real TaPEx model on the identified table sub-range.
+
+    Falls back to ``[]`` when the SpreadsheetLLM Stage 1 didn't produce a
+    table_range / sheet_name (TaPEx needs both).
+    """
+    if not table_range or not sheet_name:
+        return "[]"
+    try:
+        return tapex.answer(workbook_path, sheet_name, table_range, query)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("TaPEx baseline raised %s; recording empty answer.", exc)
+        return "[]"
 
 
 def run_binder_placeholder(encoding: Dict, query: str) -> str:
@@ -40,6 +63,7 @@ def main(
     out_record: Optional[str] = None,
     backend_name: str = "unknown",
     extra_meta: Optional[Dict] = None,
+    tapex=None,
 ):
     """Main function to run the Spreadsheet QA evaluation.
 
@@ -79,6 +103,8 @@ def main(
 
             pred_answer_llm: Optional[str] = None
             llm_correct = False
+            tapex_table_range: Optional[str] = None
+            tapex_sheet_name: Optional[str] = None
 
             # --- SpreadsheetLLM Evaluation ---
             try:
@@ -112,11 +138,29 @@ def main(
                 if pred_answer_llm.strip() == ground_truth.strip():
                     correct_spreadsheetllm += 1
                     llm_correct = True
+
+                # The real TaPEx baseline needs the same identified
+                # (sheet, table_range), but in original-workbook coords.
+                tapex_sheet_name = sheet_name
+                cm = sheet_data.get("coord_map")
+                if cm:
+                    from paper_serializers import unremap_range
+                    tapex_table_range = unremap_range(table_range, cm) or table_range
+                else:
+                    tapex_table_range = table_range
             else:
                 logger.warning("  - SpreadsheetLLM could not identify a relevant table.")
 
-            # --- Baseline Evaluations (placeholder) ---
-            pred_answer_tape = run_tape_placeholder(encoding, query)
+            # --- Baseline Evaluations ---
+            if tapex is not None:
+                pred_answer_tape = run_tape_real(
+                    tapex, spreadsheet_path,
+                    tapex_sheet_name, tapex_table_range, query,
+                )
+                tapex_kind = "real"
+            else:
+                pred_answer_tape = run_tape_placeholder(encoding, query)
+                tapex_kind = "placeholder"
             logger.info("  - TaPEx Predicted: %s", pred_answer_tape)
             tape_correct = pred_answer_tape.strip() == ground_truth.strip()
             if tape_correct:
@@ -136,7 +180,7 @@ def main(
                     "predicted": pred_answer_llm,
                     "correct": llm_correct,
                 },
-                "tapex_placeholder": {
+                f"tapex_{tapex_kind}": {
                     "predicted": pred_answer_tape,
                     "correct": tape_correct,
                 },
@@ -171,6 +215,7 @@ def main(
     logger.info("--------------------------")
 
     if out_record:
+        tapex_real = tapex is not None
         record = {
             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "task": "spreadsheet_qa",
@@ -179,9 +224,10 @@ def main(
             "backend": backend_name,
             "n_questions": total_questions,
             "spreadsheetllm_accuracy_pct": acc_llm,
-            "tapex_placeholder_accuracy_pct": acc_tape,
+            "tapex_accuracy_pct": acc_tape,
+            "tapex_kind": "real" if tapex_real else "placeholder",
             "binder_placeholder_accuracy_pct": acc_binder,
-            "baselines_are_placeholders": True,
+            "baselines_are_placeholders": not tapex_real,  # Binder still placeholder
             "per_question": per_question,
             "meta": extra_meta or {},
         }
@@ -218,6 +264,16 @@ if __name__ == "__main__":
              "the QA evaluation (timestamp, k, backend, per-question results, "
              "accuracies) so it can be diffed across iterations.",
     )
+    parser.add_argument(
+        "--real-tapex", action="store_true",
+        help="Use the real TaPEx baseline (microsoft/tapex-base-finetuned-wtq "
+             "via HuggingFace transformers). Requires `pip install transformers`. "
+             "If omitted, the placeholder is used.",
+    )
+    parser.add_argument(
+        "--tapex-model", default="microsoft/tapex-base-finetuned-wtq",
+        help="HF model id for --real-tapex (default: microsoft/tapex-base-finetuned-wtq).",
+    )
     args = parser.parse_args()
 
     from llm_backend import EchoBackend, OpenAIBackend
@@ -232,9 +288,15 @@ if __name__ == "__main__":
     # raise NotImplementedError under --backend=echo (previously a bug).
     chain_of_spreadsheet.configure_backend(backend)
 
+    tapex_instance = None
+    if args.real_tapex:
+        from baselines import TaPExBaseline
+        tapex_instance = TaPExBaseline(model=args.tapex_model)
+
     main(
         args.dataset_dir,
         args.k,
         out_record=args.out_record,
         backend_name=backend_name,
+        tapex=tapex_instance,
     )
