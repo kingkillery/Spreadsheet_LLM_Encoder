@@ -93,12 +93,16 @@ def build_finetune_manifest(
     record_count: int,
     push_to_hub_repo: Optional[str] = None,
     hub_split: str = "train",
+    base_model: Optional[str] = None,
+    adapter_settings: Optional[Dict] = None,
+    command: Optional[str] = None,
 ) -> Dict:
     """Build sidecar metadata for reproducible fine-tuning JSONL records."""
     return {
         "task": "table_detection_finetuning_data",
         "dataset_dir": os.path.abspath(dataset_dir),
         "output_path": os.path.abspath(output_path),
+        "split_name": hub_split,
         "record_count": record_count,
         "encoder_settings": {"k": k},
         "prompt_serializer": "paper_serializers.to_paper_compressed_prompt",
@@ -108,6 +112,9 @@ def build_finetune_manifest(
         "coordinate_mode": "compact_prompt_ranges",
         "completion_coordinate_mode": "compact_prompt_ranges",
         "ground_truth_unmapped_policy": "skip_with_warning",
+        "base_model": base_model,
+        "adapter_settings": adapter_settings or {},
+        "command": command,
         "hub_repo": push_to_hub_repo,
         "hub_split": hub_split,
     }

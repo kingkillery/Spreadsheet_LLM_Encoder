@@ -6,6 +6,7 @@ import unittest
 from evaluation_metadata import (
     REQUIRED_METADATA_FIELDS,
     build_evaluation_metadata,
+    validate_finetune_eval_compatibility,
     validate_evaluation_metadata,
     validate_evaluation_record,
     write_evaluation_record,
@@ -73,7 +74,49 @@ class TestEvaluationMetadata(unittest.TestCase):
             )
             self.assertTrue(os.path.exists(out_path))
 
+    def test_validate_finetune_eval_compatibility_accepts_matching_contracts(self):
+        finetune_manifest = {
+            "encoder_settings": {"k": 4},
+            "prompt_serializer": "paper_serializers.to_paper_compressed_prompt",
+            "coordinate_mode": "compact_prompt_ranges",
+        }
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/synthetic",
+            task="table_detection",
+            encoder_settings={"k": 4},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend="echo",
+            metric_definition="EoB-0",
+            baseline_name="SpreadsheetLLM table detection",
+        )
+
+        self.assertEqual(
+            validate_finetune_eval_compatibility(finetune_manifest, metadata),
+            [],
+        )
+
+    def test_validate_finetune_eval_compatibility_rejects_mismatched_k(self):
+        finetune_manifest = {
+            "encoder_settings": {"k": 2},
+            "prompt_serializer": "paper_serializers.to_paper_compressed_prompt",
+            "coordinate_mode": "compact_prompt_ranges",
+        }
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/synthetic",
+            task="table_detection",
+            encoder_settings={"k": 4},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend="echo",
+            metric_definition="EoB-0",
+            baseline_name="SpreadsheetLLM table detection",
+        )
+
+        errors = validate_finetune_eval_compatibility(finetune_manifest, metadata)
+
+        self.assertTrue(any("encoder k mismatch" in err for err in errors))
+
 
 if __name__ == "__main__":
     unittest.main()
-

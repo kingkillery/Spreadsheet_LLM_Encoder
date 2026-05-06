@@ -136,6 +136,7 @@ class TestFinetuneManifest(unittest.TestCase):
         )
 
         self.assertEqual(manifest["task"], "table_detection_finetuning_data")
+        self.assertEqual(manifest["split_name"], "train")
         self.assertEqual(manifest["record_count"], 7)
         self.assertEqual(manifest["encoder_settings"]["k"], 4)
         self.assertEqual(manifest["coordinate_mode"], "compact_prompt_ranges")
@@ -144,6 +145,9 @@ class TestFinetuneManifest(unittest.TestCase):
             manifest["coordinate_mode"],
         )
         self.assertIn("prompt_template_sha256", manifest)
+        self.assertIn("base_model", manifest)
+        self.assertIn("adapter_settings", manifest)
+        self.assertIn("command", manifest)
 
     def test_write_manifest_creates_json_file(self):
         mod = _load_module()

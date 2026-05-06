@@ -130,11 +130,47 @@ def write_evaluation_record(record: Dict[str, Any], output_path: str) -> None:
         json.dump(record, fh, indent=2)
 
 
+def validate_finetune_eval_compatibility(
+    finetune_manifest: Dict[str, Any],
+    evaluation_metadata: Dict[str, Any],
+) -> List[str]:
+    """Return errors when fine-tune data and evaluation settings diverge."""
+    errors: List[str] = []
+    if not isinstance(finetune_manifest, dict):
+        return ["finetune_manifest must be an object"]
+    meta_errors = validate_evaluation_metadata(evaluation_metadata)
+    if meta_errors:
+        errors.extend(meta_errors)
+        return errors
+
+    ft_k = (finetune_manifest.get("encoder_settings") or {}).get("k")
+    eval_k = (evaluation_metadata.get("encoder_settings") or {}).get("k")
+    if ft_k != eval_k:
+        errors.append(f"encoder k mismatch: finetune={ft_k!r} evaluation={eval_k!r}")
+
+    ft_serializer = finetune_manifest.get("prompt_serializer")
+    eval_serializer = evaluation_metadata.get("prompt_serializer")
+    if ft_serializer and eval_serializer and ft_serializer not in eval_serializer:
+        errors.append(
+            "prompt serializer mismatch: "
+            f"finetune={ft_serializer!r} evaluation={eval_serializer!r}"
+        )
+
+    ft_coord = finetune_manifest.get("coordinate_mode")
+    eval_coord = evaluation_metadata.get("coordinate_mode")
+    if ft_coord and eval_coord and "compact" in ft_coord and "compact" not in eval_coord:
+        errors.append(
+            "coordinate mode mismatch: "
+            f"finetune={ft_coord!r} evaluation={eval_coord!r}"
+        )
+    return errors
+
+
 __all__ = [
     "REQUIRED_METADATA_FIELDS",
     "build_evaluation_metadata",
     "validate_evaluation_metadata",
     "validate_evaluation_record",
+    "validate_finetune_eval_compatibility",
     "write_evaluation_record",
 ]
-
