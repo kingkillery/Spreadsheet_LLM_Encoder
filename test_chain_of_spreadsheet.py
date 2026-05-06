@@ -88,6 +88,35 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         mock_generate_response.assert_called_once()
         self.assertEqual(response, "Direct answer")
 
+    def test_find_relevant_sheet_uses_backend_before_keyword_fallback(self):
+        encoding = {
+            "sheets": {
+                "Sales": {"cells": {"revenue": ["A1"]}},
+                "Costs": {"cells": {"revenue": ["A1"], "cost": ["B1"]}},
+            }
+        }
+        backend = EchoBackend(response="Sales")
+        cos.configure_backend(backend)
+        try:
+            selected = cos.find_relevant_sheet(encoding, "cost")
+        finally:
+            cos.configure_backend(None)
+
+        self.assertEqual(selected, "Sales")
+        self.assertEqual(len(backend.calls), 1)
+
+    def test_find_relevant_sheet_keyword_fallback_without_backend(self):
+        encoding = {
+            "sheets": {
+                "Sales": {"cells": {"revenue": ["A1"]}},
+                "Costs": {"cells": {"cost": ["A1"]}},
+            }
+        }
+
+        selected = cos.find_relevant_sheet(encoding, "cost")
+
+        self.assertEqual(selected, "Costs")
+
     def test_table_split_qa_large_table_no_workbook_warns_and_calls_once(self):
         """Without workbook_path, table_split_qa warns and calls generate_response once."""
         large_encoding = {"cells": {"a" * 5000: ["A1"]}}

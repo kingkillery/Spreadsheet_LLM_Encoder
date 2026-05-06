@@ -162,12 +162,30 @@ def identify_table(
 # --- Sheet selection ---------------------------------------------------------
 
 def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
-    """Find the most relevant sheet for ``query`` via keyword matching.
+    """Find the most relevant sheet for ``query``.
 
-    When a backend is configured AND there is no clear keyword winner across
-    multiple sheets, optionally defer to the LLM to choose. Single-sheet
-    fallback is always preserved.
+    Paper-faithful multi-sheet runs should use an LLM backend to select the
+    relevant sheet. Keyword matching is retained as a documented fallback for
+    no-backend runs or invalid LLM selections. Single-sheet fallback is always
+    preserved.
     """
+    sheet_names = list(encoding.get("sheets", {}))
+    if len(sheet_names) == 1:
+        return sheet_names[0]
+
+    if _BACKEND is not None and len(sheet_names) > 1:
+        try:
+            picked = _llm_pick_sheet(sheet_names, query)
+            if picked in sheet_names:
+                return picked
+            logger.warning(
+                "LLM sheet selection returned %r; falling back to keyword matching.",
+                picked,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("LLM sheet selection failed: %s; falling back to keywords.", exc)
+
+    logger.info("Using keyword sheet selection fallback.")
     query_tokens = {t.lower() for t in query.split()}
     best_score = 0
     best_sheet: Optional[str] = None
@@ -188,19 +206,6 @@ def find_relevant_sheet(encoding: Dict, query: str) -> Optional[str]:
 
     if best_sheet and not tied:
         return best_sheet
-
-    sheet_names = list(encoding.get("sheets", {}))
-    if len(sheet_names) == 1:
-        return sheet_names[0]
-
-    # Optional: when ambiguous and a backend is configured, let the LLM pick.
-    if _BACKEND is not None and len(sheet_names) > 1:
-        try:
-            picked = _llm_pick_sheet(sheet_names, query)
-            if picked in sheet_names:
-                return picked
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("LLM sheet selection failed: %s", exc)
 
     return best_sheet
 
