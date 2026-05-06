@@ -14,7 +14,13 @@ import unittest
 
 import openpyxl
 
-from baselines import TaPExBaseline, _read_table
+from baselines import (
+    BINDER_UNAVAILABLE_REASON,
+    BaselineUnavailable,
+    BinderBaseline,
+    TaPExBaseline,
+    _read_table,
+)
 
 
 class FakePipeline:
@@ -151,6 +157,22 @@ class TestTaPExBaseline(unittest.TestCase):
             with self.assertRaises(RuntimeError) as cm:
                 tapex.answer(self.path, "Sheet", "A1:B3", "Q?")
             self.assertIn("transformers", str(cm.exception).lower())
+
+
+class TestBinderBaseline(unittest.TestCase):
+
+    def test_binder_is_explicitly_unavailable(self):
+        binder = BinderBaseline()
+
+        self.assertEqual(binder.status, "unavailable")
+        self.assertEqual(
+            binder.skip_reason(),
+            {"component": "binder", "reason": BINDER_UNAVAILABLE_REASON},
+        )
+        with self.assertRaises(BaselineUnavailable) as cm:
+            binder.answer("workbook.xlsx", "Sheet", "A1:B2", "Q?")
+        self.assertEqual(cm.exception.baseline, "Binder")
+        self.assertEqual(cm.exception.reason, BINDER_UNAVAILABLE_REASON)
 
 
 if __name__ == "__main__":

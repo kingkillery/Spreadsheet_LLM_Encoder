@@ -2,8 +2,9 @@
 
 The paper compares against TaPEx (Liu et al., 2022) and Binder (Cheng et al.,
 2023). This module provides a real TaPEx wrapper using HuggingFace
-``transformers``. Binder remains TODO — its neural-symbolic SQL execution
-loop needs a separate vendoring effort.
+``transformers``. Binder is represented by an explicit unavailable adapter so
+evaluation code can report a structured skip reason instead of carrying a
+placeholder or TODO path.
 
 The wrapper is intentionally narrow: it loads the model lazily, extracts the
 table from a workbook + table-range, runs the pipeline, and wraps the answer
@@ -21,6 +22,41 @@ from openpyxl.utils import get_column_letter
 import paper_serializers
 
 logger = logging.getLogger(__name__)
+
+BINDER_UNAVAILABLE_REASON = (
+    "Binder baseline requires a real neural-symbolic SQL adapter; this "
+    "repository does not vendor or implement that execution loop."
+)
+
+
+class BaselineUnavailable(RuntimeError):
+    """Raised when a requested baseline is documented but unavailable."""
+
+    def __init__(self, baseline: str, reason: str) -> None:
+        super().__init__(f"{baseline} baseline unavailable: {reason}")
+        self.baseline = baseline
+        self.reason = reason
+
+
+class BinderBaseline:
+    """Explicit unavailable adapter for Binder.
+
+    Binder is not silently approximated. Calling ``answer`` raises
+    :class:`BaselineUnavailable`; ``skip_reason`` returns the machine-readable
+    metadata used by evaluation scripts.
+    """
+
+    baseline_name = "Binder"
+    status = "unavailable"
+
+    def __init__(self, reason: str = BINDER_UNAVAILABLE_REASON) -> None:
+        self.reason = reason
+
+    def skip_reason(self) -> Dict[str, str]:
+        return {"component": "binder", "reason": self.reason}
+
+    def answer(self, *args: Any, **kwargs: Any) -> str:
+        raise BaselineUnavailable(self.baseline_name, self.reason)
 
 
 def _read_table(
@@ -147,4 +183,9 @@ class TaPExBaseline:
         return f"[{ans}]"
 
 
-__all__ = ["TaPExBaseline"]
+__all__ = [
+    "BINDER_UNAVAILABLE_REASON",
+    "BaselineUnavailable",
+    "BinderBaseline",
+    "TaPExBaseline",
+]

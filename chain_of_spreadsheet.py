@@ -103,9 +103,21 @@ Candidate Answers:
 
 # --- Internal helpers --------------------------------------------------------
 
-# Match ranges in either single or double quotes — LLMs use both freely.
-_RANGE_RE = re.compile(r"""['"]([A-Z]+\d+:[A-Z]+\d+)['"]""")
+# Match quoted or bare ranges — LLMs use all three forms freely.
+_RANGE_RE = re.compile(r"""(?:['"]([A-Z]+\d+:[A-Z]+\d+)['"]|\b([A-Z]+\d+:[A-Z]+\d+)\b)""")
 _STAGE2_LEGACY_WARNED = False
+
+
+def _extract_ranges(text: str) -> List[str]:
+    """Extract every Excel range from a Stage 1 response, preserving order."""
+    ranges: List[str] = []
+    seen = set()
+    for match in _RANGE_RE.finditer(text or ""):
+        rng = match.group(1) or match.group(2)
+        if rng not in seen:
+            ranges.append(rng)
+            seen.add(rng)
+    return ranges
 
 
 def _build_stage2_prompt(prompt_input: str, query: str) -> str:
@@ -151,12 +163,48 @@ def identify_table(
 
     llm_response = _call_llm(prompt)
 
-    match = _RANGE_RE.search(llm_response)
-    if match:
-        return match.group(1)
+    ranges = _extract_ranges(llm_response)
+    if ranges:
+        return ranges[0]
 
     logger.warning("Could not parse table range from LLM response: %s", llm_response)
     return None
+
+
+def identify_tables(
+    encoding: Dict,
+    query: str,
+    sheet_name: Optional[str] = None,
+) -> List[str]:
+    """Identify one or more relevant table ranges for ``query``.
+
+    The paper prompt asks for one selected range, but model responses often
+    contain structured lists. This helper keeps those ranges available for
+    callers that want to inspect or post-process multiple predictions while
+    :func:`identify_table` remains the single-range compatibility API.
+    """
+    if sheet_name is None:
+        sheet_name = find_relevant_sheet(encoding, query)
+    if not sheet_name:
+        logger.warning("Could not identify a relevant sheet for the query.")
+        return []
+
+    sheets = encoding.get("sheets", {})
+    if sheet_name not in sheets:
+        logger.warning("Sheet '%s' not present in encoding.", sheet_name)
+        return []
+    sheet_data = sheets[sheet_name]
+
+    prompt_input = paper_serializers.to_paper_compressed_prompt(
+        sheet_data,
+        coord_map=sheet_data.get("coord_map"),
+    )
+
+    prompt = QA_STAGE1_PROMPT_TEMPLATE.replace(
+        "[Encoded Spreadsheet with compression]", prompt_input
+    )
+    prompt = prompt.replace("[Question]", query)
+    return _extract_ranges(_call_llm(prompt))
 
 
 # --- Sheet selection ---------------------------------------------------------
@@ -251,6 +299,33 @@ def generate_response(
     ``sheet_data`` into the prompt and emits a one-time warning that this
     is not paper-faithful.
     """
+    payload = build_stage2_prompt_payload(
+        sheet_data,
+        query,
+        workbook_path=workbook_path,
+        sheet_name=sheet_name,
+        table_range=table_range,
+        coord_map=coord_map,
+    )
+    return _call_llm(payload["prompt"])
+
+
+def build_stage2_prompt_payload(
+    sheet_data: Dict,
+    query: str,
+    *,
+    workbook_path: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+    table_range: Optional[str] = None,
+    coord_map: Optional[Dict] = None,
+) -> Dict[str, Optional[str]]:
+    """Build a Stage 2 prompt plus mode metadata.
+
+    Returns a dict containing ``prompt``, ``prompt_input``, ``stage2_mode``,
+    ``table_range`` and ``original_range``. ``stage2_mode`` is
+    ``"original_workbook_uncompressed"`` for the paper-faithful path and
+    ``"compressed_json_fallback"`` for the legacy fallback.
+    """
     global _STAGE2_LEGACY_WARNED
 
     if workbook_path and sheet_name and table_range:
@@ -271,6 +346,7 @@ def generate_response(
         prompt_input = paper_serializers.to_stage2_uncompressed_prompt(
             workbook_path, sheet_name, original_range
         )
+        stage2_mode = "original_workbook_uncompressed"
     else:
         if not _STAGE2_LEGACY_WARNED:
             logger.warning(
@@ -280,9 +356,17 @@ def generate_response(
             )
             _STAGE2_LEGACY_WARNED = True
         prompt_input = json.dumps(sheet_data, ensure_ascii=False)
+        original_range = None
+        stage2_mode = "compressed_json_fallback"
 
     prompt = _build_stage2_prompt(prompt_input, query)
-    return _call_llm(prompt)
+    return {
+        "prompt": prompt,
+        "prompt_input": prompt_input,
+        "stage2_mode": stage2_mode,
+        "table_range": table_range,
+        "original_range": original_range,
+    }
 
 
 # --- Algorithm 2: row-chunked QA --------------------------------------------

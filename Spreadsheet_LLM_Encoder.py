@@ -34,6 +34,7 @@ def spreadsheet_llm_encode(
     k=4,
     vanilla=False,
     compress_homogeneous=True,
+    paper_strict=False,
     data_only=True,
     tokenizer_model=DEFAULT_MODEL,
 ):
@@ -50,6 +51,9 @@ def spreadsheet_llm_encode(
         compress_homogeneous (bool, optional): Drop fully-homogeneous rows/cols
             after anchor extraction. Defaults to True. Set False for strict
             paper-aligned skeleton retention.
+        paper_strict (bool, optional): Apply paper-faithful behavior where it
+            differs from pragmatic defaults. Currently this disables
+            post-anchor homogeneous row/column pruning. Defaults to False.
         data_only (bool, optional): Load cached formula values instead of formula
             text. Defaults to True (paper expects user-visible values).
         tokenizer_model (str, optional): Model name for tokenizer-based
@@ -60,6 +64,8 @@ def spreadsheet_llm_encode(
     """
     if vanilla:
         return vanilla_encode(excel_path, output_path)
+    if paper_strict:
+        compress_homogeneous = False
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
@@ -190,6 +196,7 @@ def spreadsheet_llm_encode(
             "formats": aggregated_formats,
             "numeric_ranges": numeric_ranges,
             "coord_map": coord_map,
+            "encoding_mode": "paper_strict" if paper_strict else "pragmatic",
         }
 
         # Final stage tokens: the paper-faithful compressed prompt with format
@@ -986,6 +993,14 @@ def main():
         help="Skip the homogeneous-row/col compression step (paper-strict skeleton).",
     )
     parser.add_argument(
+        "--paper-strict",
+        action="store_true",
+        help=(
+            "Use paper-faithful behavior where it differs from pragmatic "
+            "defaults; currently disables homogeneous row/column pruning."
+        ),
+    )
+    parser.add_argument(
         "--tokenizer-model",
         default=DEFAULT_MODEL,
         help=f"Model name passed to tiktoken for token counts (default: {DEFAULT_MODEL}).",
@@ -1005,6 +1020,7 @@ def main():
         k=args.k,
         vanilla=args.vanilla,
         compress_homogeneous=not args.no_compress_homogeneous,
+        paper_strict=args.paper_strict,
         tokenizer_model=args.tokenizer_model,
     )
 

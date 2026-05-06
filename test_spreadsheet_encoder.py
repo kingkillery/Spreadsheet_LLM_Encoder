@@ -169,6 +169,29 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         refs = [ref for ranges in cells.values() for ref in ranges]
         self.assertTrue(any(ref.endswith("2") or ref.endswith("3") for ref in refs))
 
+    def test_paper_strict_disables_homogeneous_compression(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "ID"
+        ws["B1"] = "Value"
+        for r in [2, 3]:
+            ws.cell(row=r, column=1, value=0)
+            ws.cell(row=r, column=2, value=0)
+        ws["A4"] = "End"
+        ws["B4"] = 5
+        path = "paper_strict.xlsx"
+        wb.save(path)
+
+        try:
+            result = spreadsheet_llm_encode(path, k=1, paper_strict=True)
+        finally:
+            os.remove(path)
+
+        sheet = result["sheets"]["Sheet"]
+        self.assertEqual(sheet["encoding_mode"], "paper_strict")
+        refs = [ref for ranges in sheet["cells"].values() for ref in ranges]
+        self.assertTrue(any(ref.endswith("2") or ref.endswith("3") for ref in refs))
+
     def test_aggregate_regions_dfs(self):
         wb = openpyxl.load_workbook(self.test_file)
         sheet = wb["Sheet1"]

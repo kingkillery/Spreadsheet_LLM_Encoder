@@ -9,15 +9,10 @@ from evaluation import load_qa_dataset, load_qa_manifest, normalize_qa_answer
 from evaluation_metadata import build_evaluation_metadata, write_evaluation_record
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 from chain_of_spreadsheet import identify_table, table_split_qa
+from baselines import BINDER_UNAVAILABLE_REASON, BinderBaseline
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-BINDER_UNAVAILABLE_REASON = (
-    "Binder baseline requires a real neural-symbolic SQL adapter; "
-    "this repository does not implement one yet."
-)
-
 
 def run_tape_placeholder(encoding: Dict, query: str) -> str:
     """Placeholder TaPEx fallback.
@@ -54,7 +49,7 @@ def run_tape_real(
 
 def run_binder_unavailable() -> Optional[str]:
     """Return no Binder prediction until a real adapter exists."""
-    logger.info("Skipping Binder baseline: %s", BINDER_UNAVAILABLE_REASON)
+    logger.info("Skipping Binder baseline: %s", BinderBaseline().reason)
     return None
 
 
@@ -231,12 +226,7 @@ def main(
 
     if out_record:
         tapex_real = tapex is not None
-        skip_reasons = [
-            {
-                "component": "binder",
-                "reason": BINDER_UNAVAILABLE_REASON,
-            }
-        ]
+        skip_reasons = [BinderBaseline().skip_reason()]
         if not tapex_real:
             skip_reasons.append({
                 "component": "tapex",

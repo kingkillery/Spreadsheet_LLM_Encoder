@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft for final paper-alignment, bug-fix, and reproducibility work.
+Feasible repo-local polish items are implemented. The remaining work is
+paper-parity work that requires original or reconstructed benchmark artifacts,
+model-training runs, or a real Binder adapter implementation.
 
 ## Product Goal
 
@@ -42,11 +44,9 @@ Already implemented:
 
 Known remaining gaps:
 
-- Structural-anchor extraction is still simpler than Appendix C.
-- Data-format aggregation does not yet choose between Excel number-format strings and semantic labels in a paper-faithful way.
-- CoS Stage 1 table selection and large-table synthesis are still approximations.
-- Evaluation lacks paper dataset splits, full reproducibility metadata, Binder support, and fine-tuning run records.
-- Documentation still overstates some paper-faithful behavior in places.
+- Structural-anchor extraction is still an Appendix C-inspired approximation, not a proven equivalent implementation.
+- Evaluation cannot claim paper-original parity until the paper datasets, splits, model procedures, and baseline parity artifacts are supplied or reconstructed.
+- Binder support is represented by an explicit unavailable adapter and machine-readable skip reason until a real neural-symbolic SQL implementation is added.
 
 ## Users
 
@@ -285,12 +285,12 @@ Acceptance:
 2. Add import/package smoke tests.
 3. Add evaluation metadata schema and validator.
 4. Correct README paper-fidelity claims.
-5. Implement data-format NFS-vs-label selection.
-6. Improve CoS Stage 1 table selection and chunk synthesis.
+5. Implement data-format NFS-vs-label selection. **Done.**
+6. Improve CoS Stage 1 table selection and chunk synthesis. **Done where feasible: backend-first selection, multi-range parsing, Stage 2 mode metadata, and final chunk synthesis are implemented.**
 7. Expand structural-anchor fixtures and heuristics.
 8. Add benchmark manifests and synthetic CI benchmark.
 9. Add fine-tuning metadata sidecar.
-10. Decide whether Binder remains documented unavailable or gets a real implementation.
+10. Decide whether Binder remains documented unavailable or gets a real implementation. **Done: documented unavailable with explicit adapter and skip reason.**
 
 ## Release Gate Checklist
 
@@ -318,4 +318,3 @@ Acceptance:
 - Issue 9: Add benchmark manifests and synthetic parity runs.
 - Issue 10: Add fine-tuning metadata sidecars.
 - Issue 11: Document Binder as unavailable or implement a real adapter.
-

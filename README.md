@@ -279,11 +279,12 @@ This section documents changes made to align the implementation with the paper (
 | Inverted-index translation | Mostly aligned | Repeated values are represented through address ranges. |
 | Data-format aggregation | Mostly aligned | Default grouping uses semantic type plus Excel NFS only; informative NFS strings such as `#,##0`, `d-mmm-yy`, and `H:mm:ss` are emitted directly. Rich style grouping is available only through the lower-level `create_inverted_index(..., format_mode="rich")` API. |
 | Coordinate remapping | Mostly aligned | Prompts use compact coordinates and saved JSON maps are normalized on reload. |
-| Chain-of-Spreadsheet | Partially aligned | Stage 2 can use original-workbook uncompressed ranges; sheet selection and some fallbacks remain pragmatic. |
+| Chain-of-Spreadsheet | Mostly aligned | Stage 1 uses compressed paper-style prompts, can parse multiple predicted ranges, and Stage 2 records whether it used original-workbook uncompressed pairs or compressed fallback JSON. Sheet selection fallbacks remain pragmatic. |
 | Evaluation reproduction | Scaffold only | Scripts emit reproducibility metadata, but paper datasets/splits/fine-tuning runs are not bundled. |
-| Baselines | Partial | TaPEx has a real optional wrapper; Binder is documented unavailable until a real adapter is implemented. |
+| Baselines | Partial | TaPEx has a real optional wrapper; Binder is an explicit unavailable adapter that emits machine-readable skip reasons until a real implementation exists. |
 
 - **Default k**: Changed from 2 to 4 (paper's best ablation; see Appendix E).
+- **Strict skeleton**: Pass `--paper-strict` or `--no-compress-homogeneous` to preserve all rows/cols within the structural-anchor neighborhood. The default still keeps the pragmatic homogeneous-row/col pruning used by earlier repo versions.
 - **Real Stage 2**: `generate_response` now reads the original workbook and emits the uncompressed pair-string for identified sub-ranges (Section 4.2), not the compressed encoding. Call with `workbook_path`, `sheet_name`, and `table_range` for paper-faithful behavior.
 - **Real Algorithm 2**: `table_split_qa` now performs actual body-row chunking (Appendix M.2), partitioning rows greedily so each `header + chunk` fits the token limit.
 - **Tokenizer-based metrics**: Compression ratios now use `tiktoken` (when available) instead of character counts, matching the paper's reported numbers. Fallback to char/4 when tiktoken is unavailable.
@@ -294,7 +295,7 @@ This section documents changes made to align the implementation with the paper (
 
 **Not yet implemented** (per the original paper):
 - Paper datasets are not bundled.
-- Binder baseline comparison is documented unavailable until a real adapter is implemented.
+- Binder baseline comparison is explicitly unavailable until a real adapter is implemented.
 - Fine-tuning execution is documented as a recipe; reproducing paper training runs still requires dataset, split, model, and run metadata.
 
 ## Research Background

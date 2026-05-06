@@ -54,6 +54,16 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         # Response was parsed into the range correctly.
         self.assertEqual(table_range, "A1:B2")
 
+    @patch('chain_of_spreadsheet._call_llm')
+    def test_identify_tables_returns_multiple_ranges(self, mock_call_llm):
+        mock_call_llm.return_value = (
+            "[{'range': 'A1:B2'}, {'range': 'D4:E9'}, {'range': 'A1:B2'}]"
+        )
+
+        ranges = cos.identify_tables(self.sample_encoding, self.sample_query)
+
+        self.assertEqual(ranges, ["A1:B2", "D4:E9"])
+
     # ------------------------------------------------------------------
     # Stage 2: generate_response
     # ------------------------------------------------------------------
@@ -69,6 +79,41 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         prompt_arg = mock_call_llm.call_args[0][0]
         self.assertIn(self.sample_query, prompt_arg)
         self.assertEqual(response, "[C5]")
+
+    def test_build_stage2_prompt_payload_reports_fallback_mode(self):
+        sheet_data = self.sample_encoding["sheets"]["Sheet1"]
+
+        payload = cos.build_stage2_prompt_payload(sheet_data, self.sample_query)
+
+        self.assertEqual(payload["stage2_mode"], "compressed_json_fallback")
+        self.assertIsNone(payload["original_range"])
+        self.assertIn(self.sample_query, payload["prompt"])
+
+    def test_build_stage2_prompt_payload_reports_uncompressed_mode(self):
+        tmp_dir = tempfile.mkdtemp()
+        tmp_xlsx = os.path.join(tmp_dir, "stage2.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet"
+        ws["A1"] = "Header"
+        ws["A2"] = "Value"
+        wb.save(tmp_xlsx)
+
+        try:
+            payload = cos.build_stage2_prompt_payload(
+                {"coord_map": paper_serializers.build_coord_map([1, 2], [1])},
+                self.sample_query,
+                workbook_path=tmp_xlsx,
+                sheet_name="Sheet",
+                table_range="A1:A2",
+            )
+        finally:
+            os.remove(tmp_xlsx)
+            os.rmdir(tmp_dir)
+
+        self.assertEqual(payload["stage2_mode"], "original_workbook_uncompressed")
+        self.assertEqual(payload["original_range"], "A1:A2")
+        self.assertIn("A1,Header|A2,Value", payload["prompt_input"])
 
     # ------------------------------------------------------------------
     # table_split_qa — legacy path (no workbook_path)
@@ -257,11 +302,21 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         """LLMs sometimes emit double-quoted ranges; the parser must accept both."""
         match = cos._RANGE_RE.search('["range": "A1:F9"]')
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "A1:F9")
+        self.assertEqual(match.group(1) or match.group(2), "A1:F9")
 
         match = cos._RANGE_RE.search("['range': 'B2:Z10']")
         self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "B2:Z10")
+        self.assertEqual(match.group(1) or match.group(2), "B2:Z10")
+
+        match = cos._RANGE_RE.search("range: C3:D4")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1) or match.group(2), "C3:D4")
+
+    def test_extract_ranges_deduplicates_in_order(self):
+        ranges = cos._extract_ranges(
+            "[{'range': 'A1:B2'}, {'range': 'C3:D4'}, {'range': 'A1:B2'}]"
+        )
+        self.assertEqual(ranges, ["A1:B2", "C3:D4"])
 
 
 if __name__ == '__main__':
