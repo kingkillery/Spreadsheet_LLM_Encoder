@@ -131,6 +131,7 @@ A lossless inverted index is created, mapping cell content to cell addresses. Th
 This module groups cells to reduce redundancy and enhance semantic meaning.
 - **Semantic Type Detection**: The encoder now recognizes a wider range of semantic types, including **Integer, Float, and Email**, by inspecting both the number format string and the cell value itself.
 - **DFS-based Aggregation**: Instead of a simple greedy search, the encoder uses a Depth-First Search (DFS) algorithm (as described in Appendix M.1 of the paper) to find all contiguous regions of cells that share the same semantic type and number format. This correctly aggregates complex, non-rectangular shapes.
+- **Paper-faithful format keys**: The default compression path groups format regions only by semantic type and Excel number-format string. Rich style attributes such as fonts, fills, borders, and alignment are used for structural-anchor heuristics, but they are not emitted as default data-format aggregation keys because the paper reports that detailed style metadata hurts token efficiency.
 
 The final output is a structured JSON document containing the structural anchors, the inverted index, aggregated format regions, and numeric ranges.
 
@@ -276,7 +277,7 @@ This section documents changes made to align the implementation with the paper (
 | Paper-style serializers | Mostly aligned | Runtime prompts use pair-string tuple serializers; saved CLI artifacts remain JSON. |
 | Structural-anchor extraction | Approximation | Current heuristics are Appendix C-inspired but do not fully implement every sparsity, header/title/note, and overlap rule. |
 | Inverted-index translation | Mostly aligned | Repeated values are represented through address ranges. |
-| Data-format aggregation | Partially aligned | Generic formats use semantic labels; informative Excel NFS strings such as `#,##0`, `d-mmm-yy`, and `H:mm:ss` are emitted directly. |
+| Data-format aggregation | Mostly aligned | Default grouping uses semantic type plus Excel NFS only; informative NFS strings such as `#,##0`, `d-mmm-yy`, and `H:mm:ss` are emitted directly. Rich style grouping is available only through the lower-level `create_inverted_index(..., format_mode="rich")` API. |
 | Coordinate remapping | Mostly aligned | Prompts use compact coordinates and saved JSON maps are normalized on reload. |
 | Chain-of-Spreadsheet | Partially aligned | Stage 2 can use original-workbook uncompressed ranges; sheet selection and some fallbacks remain pragmatic. |
 | Evaluation reproduction | Scaffold only | Scripts emit reproducibility metadata, but paper datasets/splits/fine-tuning runs are not bundled. |

@@ -5,6 +5,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from Spreadsheet_LLM_Encoder import (
     spreadsheet_llm_encode,
+    create_inverted_index,
     find_boundary_candidates,
     aggregate_regions_dfs,
     vanilla_encode,
@@ -184,6 +185,27 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         key2 = json.dumps({"type": "text", "nfs": "General"}, sort_keys=True)
         self.assertIn("A2:B3", aggregated[key1])
         self.assertIn("D4:E4", aggregated[key2])
+
+    def test_paper_format_grouping_ignores_rich_styles(self):
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        sheet["A1"] = 100
+        sheet["B1"] = 200
+        sheet["A1"].number_format = "#,##0"
+        sheet["B1"].number_format = "#,##0"
+        sheet["A1"].font = Font(bold=True)
+        sheet["B1"].fill = PatternFill("solid", fgColor="FFFF00")
+
+        _, paper_format_map = create_inverted_index(sheet, [1], [1, 2])
+        _, rich_format_map = create_inverted_index(
+            sheet, [1], [1, 2], format_mode="rich"
+        )
+
+        self.assertEqual(1, len(paper_format_map))
+        paper_key = json.loads(next(iter(paper_format_map.keys())))
+        self.assertEqual("#,##0", paper_key["nfs"])
+        self.assertIn(paper_key["type"], {"integer", "numeric"})
+        self.assertGreater(len(rich_format_map), 1)
 
     def test_spreadsheet_llm_encode_runs(self):
         result = spreadsheet_llm_encode(self.test_file)

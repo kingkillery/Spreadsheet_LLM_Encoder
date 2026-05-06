@@ -127,7 +127,9 @@ def spreadsheet_llm_encode(
         anchor_prompt = "|".join(anchor_parts)
         anchor_tokens = count_tokens(anchor_prompt, model=tokenizer_model)
 
-        inverted_index, format_map = create_inverted_index(sheet, kept_rows, kept_cols)
+        inverted_index, format_map = create_inverted_index(
+            sheet, kept_rows, kept_cols, format_mode="paper"
+        )
         logger.info(
             f"Created inverted index with {len(inverted_index)} unique values"
         )
@@ -142,18 +144,23 @@ def spreadsheet_llm_encode(
         index_prompt = paper_serializers.to_paper_compressed_prompt(index_only_encoding)
         index_tokens = count_tokens(index_prompt, model=tokenizer_model)
 
-        # Create a map from a semantic key to cell references for aggregation
+        # Create a paper-format map from semantic keys to cell references. Older
+        # callers may still pass rich-style keys, so keep a compatibility path.
         type_nfs_map = defaultdict(list)
-        for _, cells in format_map.items():
+        for fmt_key, cells in format_map.items():
+            try:
+                fmt = json.loads(fmt_key)
+            except Exception:
+                fmt = {}
+            if set(("type", "nfs")).issubset(fmt.keys()):
+                type_nfs_map[fmt_key].extend(cells)
+                continue
             for cell_ref in cells:
                 try:
                     cell = sheet[cell_ref]
                 except Exception:
                     continue
-                nfs = get_number_format_string(cell)
-                sem_type = detect_semantic_type(cell)
-                key = json.dumps({"type": sem_type, "nfs": nfs}, sort_keys=True)
-                type_nfs_map[key].append(cell_ref)
+                type_nfs_map[_paper_format_key(cell)].append(cell_ref)
 
         aggregated_formats = aggregate_regions_dfs(sheet, type_nfs_map)
         logger.info(
@@ -640,8 +647,87 @@ def compress_homogeneous_regions(sheet, rows, cols):
     return filtered_rows, filtered_cols
 
 
-def create_inverted_index(sheet, kept_rows, kept_cols):
-    """Create an inverted index, handling merged cells."""
+def _paper_format_key(cell):
+    """Return the paper-faithful semantic format key for a cell."""
+    nfs = get_number_format_string(cell)
+    sem_type = detect_semantic_type(cell)
+    return json.dumps({"type": sem_type, "nfs": nfs}, sort_keys=True)
+
+
+def _rich_format_key(cell, merged_range=None):
+    """Return the legacy rich-style format key for experimental analysis."""
+    format_info = {}
+
+    # 1. Font Styles
+    font = cell.font
+    format_info["font"] = {
+        "bold": font.bold,
+        "italic": font.italic,
+        "underline": font.underline,
+        "name": font.name,
+        "size": font.sz,
+        "color": str(font.color.rgb) if font.color and font.color.rgb else None,
+    }
+
+    # 2. Alignment
+    alignment = cell.alignment
+    format_info["alignment"] = {
+        "horizontal": alignment.horizontal,
+        "vertical": alignment.vertical,
+    }
+
+    # 3. Borders
+    border = cell.border
+    format_info["border"] = {
+        side: {
+            "style": getattr(border, side).style,
+            "color": (
+                str(getattr(border, side).color.rgb)
+                if getattr(border, side).color and getattr(border, side).color.rgb
+                else None
+            ),
+        }
+        for side in ["left", "right", "top", "bottom"]
+    }
+
+    # 4. Fill (Background Color)
+    fill = cell.fill
+    if hasattr(fill, 'patternType') and fill.patternType == "solid":
+        format_info["fill"] = {"color": str(fill.start_color.index)
+                               if fill.start_color and fill.start_color.index else None}
+    else:
+        format_info["fill"] = {"color": None}
+
+    # 5. Number Format (Original, Inferred Type, Category)
+    original_number_format = cell.number_format
+    inferred_type = infer_cell_data_type(cell)
+    category = categorize_number_format(original_number_format, cell)
+
+    format_info["original_number_format"] = original_number_format
+    format_info["inferred_data_type"] = inferred_type
+    format_info["number_format_category"] = category
+
+    if merged_range is not None:
+        format_info["merged"] = True
+        format_info["merged_range"] = str(merged_range)
+    else:
+        format_info["merged"] = False
+
+    return json.dumps(format_info, sort_keys=True)
+
+
+def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
+    """Create an inverted index, handling merged cells.
+
+    ``format_mode="paper"`` groups cells only by semantic type and Excel
+    number-format string, which matches SheetCompressor's data-format-aware
+    aggregation. ``format_mode="rich"`` preserves the older style-heavy key for
+    experiments, but rich style metadata is intentionally not the default
+    paper path.
+    """
+    if format_mode not in {"paper", "rich"}:
+        raise ValueError("format_mode must be 'paper' or 'rich'")
+
     inverted_index = defaultdict(list)
     format_map = defaultdict(list)
     merged_ranges = sheet.merged_cells.ranges  # get all merged cell ranges
@@ -682,64 +768,10 @@ def create_inverted_index(sheet, kept_rows, kept_cols):
 
             # Format Handling
             try:
-                format_info = {}
-                # 1. Font Styles
-                font = cell.font
-                format_info["font"] = {
-                    "bold": font.bold,
-                    "italic": font.italic,
-                    "underline": font.underline,
-                    "name": font.name,
-                    "size": font.sz,
-                    "color": str(font.color.rgb) if font.color and font.color.rgb else None,
-                }
-
-                # 2. Alignment
-                alignment = cell.alignment
-                format_info["alignment"] = {
-                    "horizontal": alignment.horizontal,
-                    "vertical": alignment.vertical,
-                }
-
-                # 3. Borders
-                border = cell.border
-                format_info["border"] = {
-                    side: {
-                        "style": getattr(border, side).style,
-                        "color": (
-                            str(getattr(border, side).color.rgb)
-                            if getattr(border, side).color and getattr(border, side).color.rgb
-                            else None
-                        ),
-                    }
-                    for side in ["left", "right", "top", "bottom"]
-                }
-
-                # 4. Fill (Background Color)
-                fill = cell.fill
-                if hasattr(fill, 'patternType') and fill.patternType == "solid":
-                    format_info["fill"] = {"color": str(fill.start_color.index)
-                                           if fill.start_color and fill.start_color.index else None}
+                if format_mode == "paper":
+                    format_key = _paper_format_key(cell)
                 else:
-                    format_info["fill"] = {"color": None}
-
-                # 5. Number Format (Original, Inferred Type, Category)
-                original_number_format = cell.number_format
-                inferred_type = infer_cell_data_type(cell)
-                category = categorize_number_format(original_number_format, cell)
-
-                format_info["original_number_format"] = original_number_format
-                format_info["inferred_data_type"] = inferred_type
-                format_info["number_format_category"] = category
-
-                # Store the format (handle merged ranges specially in format key)
-                if merged_range is not None:
-                    format_info["merged"] = True
-                    format_info["merged_range"] = str(merged_range)
-                else:
-                    format_info["merged"] = False
-
-                format_key = json.dumps(format_info, sort_keys=True)
+                    format_key = _rich_format_key(cell, merged_range)
                 format_map[format_key].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell formats
