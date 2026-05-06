@@ -62,6 +62,59 @@ class TestPushToHubMissingDatasetsPackage(unittest.TestCase):
         self.assertIn("pip install datasets", str(ctx.exception))
 
 
+class TestFormatForFinetuningCoordinates(unittest.TestCase):
+    """Fine-tuning targets must use the same compact coordinates as prompts."""
+
+    def test_completion_ranges_are_remapped_to_prompt_coordinates(self):
+        mod = _load_module()
+        int_key = json.dumps({"type": "integer", "nfs": "0"}, sort_keys=True)
+        coord_map = {
+            "rows": {"2": 1, "3": 2},
+            "cols": {"3": 1, "4": 2},
+            "rows_inv": {"1": 2, "2": 3},
+            "cols_inv": {"1": 3, "2": 4},
+        }
+        encoding = {
+            "sheets": {
+                "Sheet1": {
+                    "cells": {},
+                    "formats": {int_key: ["C2:D3"]},
+                    "coord_map": coord_map,
+                }
+            }
+        }
+
+        records = mod.format_for_finetuning(encoding, [(2, 3, 3, 4)])
+
+        self.assertEqual(len(records), 1)
+        self.assertIn("(IntNum|A1:B2)", records[0]["prompt"])
+        self.assertIn("'range': 'A1:B2'", records[0]["completion"])
+        self.assertNotIn("'range': 'C2:D3'", records[0]["completion"])
+
+    def test_unmapped_ground_truth_box_is_skipped(self):
+        mod = _load_module()
+        coord_map = {
+            "rows": {"2": 1},
+            "cols": {"3": 1},
+            "rows_inv": {"1": 2},
+            "cols_inv": {"1": 3},
+        }
+        encoding = {
+            "sheets": {
+                "Sheet1": {
+                    "cells": {"x": ["C2"]},
+                    "formats": {},
+                    "coord_map": coord_map,
+                }
+            }
+        }
+
+        with self.assertLogs("prepare_finetuning_data", level="WARNING"):
+            records = mod.format_for_finetuning(encoding, [(2, 3, 3, 4)])
+
+        self.assertEqual(records[0]["completion"], "[]")
+
+
 class TestPushToHubNotCalledWhenFlagAbsent(unittest.TestCase):
     """When --push-to-hub is None, datasets must never be imported or called."""
 

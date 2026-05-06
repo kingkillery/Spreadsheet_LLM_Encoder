@@ -13,8 +13,40 @@ dependencies = [
     "streamlit"
 ]
 
+[project.optional-dependencies]
+tokenizer = ["tiktoken>=0.7.0"]
+openai = ["openai>=1.0"]
+finetune = [
+    "datasets>=2.14",
+    "transformers>=4.40",
+    "peft>=0.10",
+    "accelerate>=0.28"
+]
+qlora = ["bitsandbytes>=0.43"]
+baselines = ["transformers>=4.40"]
+all = [
+    "tiktoken>=0.7.0",
+    "openai>=1.0",
+    "datasets>=2.14",
+    "transformers>=4.40",
+    "peft>=0.10",
+    "accelerate>=0.28"
+]
+
 [project.scripts]
 spreadsheet-llm-encode = "Spreadsheet_LLM_Encoder:main"
 
 [tool.setuptools]
-py-modules = ["Spreadsheet_LLM_Encoder", "streamlit_app", "temp_helpers"]
+py-modules = [
+    "Spreadsheet_LLM_Encoder",
+    "app_helpers",
+    "baselines",
+    "chain_of_spreadsheet",
+    "evaluation",
+    "llm_backend",
+    "paper_serializers",
+    "prepare_finetuning_data",
+    "streamlit_app",
+    "temp_helpers",
+    "tokenizer"
+]

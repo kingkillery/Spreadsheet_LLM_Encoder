@@ -127,8 +127,36 @@ def build_coord_map(kept_rows: Iterable[int], kept_cols: Iterable[int]) -> Coord
     }
 
 
+def normalize_coord_map(coord_map: Optional[Dict[str, Any]]) -> CoordMap:
+    """Return a coord_map with integer keys/values after JSON reload.
+
+    JSON object keys are always strings, so a saved encoding turns
+    ``{"rows": {1: 1}}`` into ``{"rows": {"1": 1}}``. Remapping requires
+    integer lookup keys, so normalize both directions before use.
+    """
+    normalized: CoordMap = {"rows": {}, "cols": {}, "rows_inv": {}, "cols_inv": {}}
+    if not isinstance(coord_map, dict):
+        return normalized
+    for axis in normalized:
+        mapping = coord_map.get(axis, {})
+        if not isinstance(mapping, dict):
+            continue
+        for key, value in mapping.items():
+            try:
+                normalized[axis][int(key)] = int(value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skipping non-integer coord_map entry %s[%r]=%r",
+                    axis,
+                    key,
+                    value,
+                )
+    return normalized
+
+
 def remap_ref(ref: str, coord_map: CoordMap) -> Optional[str]:
     """Apply original→compact map to a single cell. Returns ``None`` if any axis is unmapped."""
+    coord_map = normalize_coord_map(coord_map)
     row, col = split_ref(ref)
     new_row = coord_map.get("rows", {}).get(row)
     new_col = coord_map.get("cols", {}).get(col)
@@ -139,6 +167,7 @@ def remap_ref(ref: str, coord_map: CoordMap) -> Optional[str]:
 
 def remap_range(rng: str, coord_map: CoordMap) -> Optional[str]:
     """Apply original→compact map to a range. Returns ``None`` if any endpoint is unmapped."""
+    coord_map = normalize_coord_map(coord_map)
     r1, c1, r2, c2 = parse_range(rng)
     rows = coord_map.get("rows", {})
     cols = coord_map.get("cols", {})
@@ -151,6 +180,7 @@ def remap_range(rng: str, coord_map: CoordMap) -> Optional[str]:
 
 def unremap_range(rng: str, coord_map: CoordMap) -> Optional[str]:
     """Reverse a coord_map: compact range → original range."""
+    coord_map = normalize_coord_map(coord_map)
     inverted = {
         "rows": coord_map.get("rows_inv", {}),
         "cols": coord_map.get("cols_inv", {}),
@@ -235,7 +265,8 @@ def to_paper_compressed_prompt(
     ``separator`` is inserted between tuples; default is empty (paper-style
     ``(Year|A1)( |B1)…`` concatenation).
     """
-    coord_map = coord_map or sheet_encoding.get("coord_map")
+    coord_map_input = coord_map or sheet_encoding.get("coord_map")
+    coord_map = normalize_coord_map(coord_map_input) if coord_map_input else None
 
     cells: Dict[str, List[str]] = sheet_encoding.get("cells", {}) or {}
     formats: Dict[str, List[str]] = sheet_encoding.get("formats", {}) or {}
@@ -354,6 +385,7 @@ __all__ = [
     "format_ref",
     "format_range",
     "build_coord_map",
+    "normalize_coord_map",
     "remap_ref",
     "remap_range",
     "unremap_range",

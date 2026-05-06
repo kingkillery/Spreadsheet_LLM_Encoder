@@ -30,6 +30,14 @@ def bbox_to_range(bbox: BBox) -> str:
     return f"{start_cell}:{end_cell}"
 
 
+def bbox_to_prompt_range(bbox: BBox, coord_map: Optional[Dict] = None) -> Optional[str]:
+    """Convert a ground-truth box to the coordinate space shown in the prompt."""
+    original_range = bbox_to_range(bbox)
+    if not coord_map:
+        return original_range
+    return paper_serializers.remap_range(original_range, coord_map)
+
+
 def format_for_finetuning(encoding: Dict, gt_boxes: List[BBox]) -> List[Dict]:
     """
     Formats the encoded spreadsheet and ground truth into a list of dicts,
@@ -43,7 +51,18 @@ def format_for_finetuning(encoding: Dict, gt_boxes: List[BBox]) -> List[Dict]:
         )
         prompt = TABLE_DETECTION_PROMPT_TEMPLATE.replace("[Encoded Spreadsheet]", prompt_input)
 
-        gt_ranges = [bbox_to_range(bbox) for bbox in gt_boxes]
+        gt_ranges = []
+        for bbox in gt_boxes:
+            prompt_range = bbox_to_prompt_range(bbox, coord_map)
+            if prompt_range is None:
+                logger.warning(
+                    "Skipping ground-truth box %s because it is not present in "
+                    "the compressed prompt coordinate map for sheet %s.",
+                    bbox,
+                    sheet_name,
+                )
+                continue
+            gt_ranges.append(prompt_range)
         range_parts = ["'range': '" + r + "'" for r in gt_ranges]
         completion = "[" + ", ".join(range_parts) + "]"
 

@@ -112,6 +112,16 @@ class TestRemapRange(unittest.TestCase):
         original = ps.unremap_range(compact, self.coord_map)
         self.assertEqual(original, "C5")
 
+    def test_remap_range_accepts_json_reloaded_string_keys(self):
+        reloaded = json.loads(json.dumps(self.coord_map))
+        result = ps.remap_range("C5", reloaded)
+        self.assertEqual(result, "B2")
+
+    def test_unremap_range_accepts_json_reloaded_string_keys(self):
+        reloaded = json.loads(json.dumps(self.coord_map))
+        result = ps.unremap_range("B2", reloaded)
+        self.assertEqual(result, "C5")
+
     def test_unremap_range_returns_none_for_out_of_bounds(self):
         # Compact row 9 does not exist in rows_inv
         result = ps.unremap_range("A9", self.coord_map)
@@ -231,6 +241,17 @@ class TestCompressedPrompt(unittest.TestCase):
         # A1:B2 remaps to A1:B2 (same compact coords since rows/cols 1,2 map to 1,2)
         self.assertIn("IntNum", result)
         self.assertIn("A1:B2", result)
+
+    def test_embedded_json_reloaded_coord_map_remaps_addresses(self):
+        coord_map = json.loads(json.dumps(ps.build_coord_map([2], [3])))
+        int_key = _fmt_key("integer", "0")
+        encoding = {
+            "cells": {},
+            "formats": {int_key: ["C2"]},
+            "coord_map": coord_map,
+        }
+        result = ps.to_paper_compressed_prompt(encoding)
+        self.assertEqual(result, "(IntNum|A1)")
 
     def test_non_compressible_format_key_still_emits_literal(self):
         text_key = _fmt_key("text")
