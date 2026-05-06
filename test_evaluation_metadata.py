@@ -4,6 +4,8 @@ import tempfile
 import unittest
 
 from evaluation_metadata import (
+    BASELINE_STATUSES,
+    CLAIM_LEVELS,
     REQUIRED_METADATA_FIELDS,
     build_evaluation_metadata,
     validate_finetune_eval_compatibility,
@@ -32,6 +34,8 @@ class TestEvaluationMetadata(unittest.TestCase):
 
         for field in REQUIRED_METADATA_FIELDS:
             self.assertIn(field, metadata)
+        self.assertIn(metadata["claim_level"], CLAIM_LEVELS)
+        self.assertIn(metadata["baseline_status"], BASELINE_STATUSES)
         self.assertEqual(validate_evaluation_metadata(metadata), [])
 
     def test_validate_record_rejects_missing_metadata(self):
@@ -116,6 +120,81 @@ class TestEvaluationMetadata(unittest.TestCase):
         errors = validate_finetune_eval_compatibility(finetune_manifest, metadata)
 
         self.assertTrue(any("encoder k mismatch" in err for err in errors))
+
+    def test_validate_metadata_rejects_invalid_claim_level(self):
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/synthetic",
+            task="table_detection",
+            prompt_serializer="serializer",
+            coordinate_mode="coordinate_mode",
+            model_backend="echo",
+            metric_definition="metric",
+            baseline_name="baseline",
+        )
+        metadata["claim_level"] = "paperish"
+
+        errors = validate_evaluation_metadata(metadata)
+
+        self.assertTrue(any("claim_level" in err for err in errors))
+
+    def test_paper_original_claim_requires_concrete_parity_metadata(self):
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/synthetic",
+            task="table_detection",
+            claim_level="paper-original",
+            dataset_name="paper_tables",
+            dataset_version="unspecified",
+            split_name="unspecified",
+            spreadsheet_count=0,
+            table_count=0,
+            encoder_settings={},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend="unknown",
+            metric_definition="EoB-0",
+            baseline_name="SpreadsheetLLM table detection",
+            baseline_version="unspecified",
+            baseline_status="run",
+        )
+
+        errors = validate_evaluation_metadata(metadata)
+
+        self.assertIn(
+            "paper-original claim requires concrete evaluation_metadata.dataset_version",
+            errors,
+        )
+        self.assertIn(
+            "paper-original claim requires concrete evaluation_metadata.split_name",
+            errors,
+        )
+        self.assertIn(
+            "paper-original claim requires concrete evaluation_metadata.model_backend",
+            errors,
+        )
+        self.assertIn("paper-original claim requires spreadsheet_count > 0", errors)
+        self.assertIn("paper-original claim requires non-empty encoder_settings", errors)
+
+    def test_paper_original_claim_accepts_complete_metadata(self):
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/paper_original",
+            task="table_detection",
+            claim_level="paper-original",
+            dataset_name="spreadsheetllm_original_table_detection",
+            dataset_version="paper-release-1",
+            split_name="test",
+            spreadsheet_count=188,
+            table_count=311,
+            encoder_settings={"k": 4},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend="gpt-4-paper-procedure",
+            metric_definition="EoB-0 exact boundary matching; threshold=0.0",
+            baseline_name="SpreadsheetLLM table detection",
+            baseline_version="paper-procedure",
+            baseline_status="run",
+        )
+
+        self.assertEqual(validate_evaluation_metadata(metadata), [])
 
 
 if __name__ == "__main__":

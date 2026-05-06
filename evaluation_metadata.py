@@ -12,8 +12,11 @@ import json
 import os
 from typing import Any, Dict, Iterable, List, Optional
 
+CLAIM_LEVELS = ("synthetic", "reconstructed", "paper-original")
+BASELINE_STATUSES = ("run", "partial", "skipped", "unavailable", "not_applicable")
 
 REQUIRED_METADATA_FIELDS = (
+    "claim_level",
     "dataset_name",
     "dataset_version",
     "split_name",
@@ -27,6 +30,7 @@ REQUIRED_METADATA_FIELDS = (
     "metric_definition",
     "baseline_name",
     "baseline_version",
+    "baseline_status",
     "skip_reasons",
 )
 
@@ -38,6 +42,7 @@ def build_evaluation_metadata(
     split_name: str = "unspecified",
     dataset_name: Optional[str] = None,
     dataset_version: str = "unspecified",
+    claim_level: str = "synthetic",
     spreadsheet_count: int = 0,
     table_count: int = 0,
     qa_item_count: int = 0,
@@ -48,13 +53,18 @@ def build_evaluation_metadata(
     metric_definition: str,
     baseline_name: str,
     baseline_version: str = "unspecified",
+    baseline_status: Optional[str] = None,
     skip_reasons: Optional[Iterable[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Build the common metadata block required for comparable results."""
     dataset_abs = os.path.abspath(dataset_dir)
+    skip_list = list(skip_reasons or [])
+    if baseline_status is None:
+        baseline_status = "partial" if skip_list else "run"
     return {
         "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "task": task,
+        "claim_level": claim_level,
         "dataset_name": dataset_name or os.path.basename(dataset_abs) or dataset_abs,
         "dataset_version": dataset_version,
         "dataset_dir": dataset_abs,
@@ -69,7 +79,8 @@ def build_evaluation_metadata(
         "metric_definition": metric_definition,
         "baseline_name": baseline_name,
         "baseline_version": baseline_version,
-        "skip_reasons": list(skip_reasons or []),
+        "baseline_status": baseline_status,
+        "skip_reasons": skip_list,
     }
 
 
@@ -87,16 +98,32 @@ def validate_evaluation_metadata(metadata: Dict[str, Any]) -> List[str]:
         "dataset_name",
         "dataset_version",
         "split_name",
+        "claim_level",
         "prompt_serializer",
         "coordinate_mode",
         "model_backend",
         "metric_definition",
         "baseline_name",
         "baseline_version",
+        "baseline_status",
     ):
         value = metadata.get(field)
         if value is None or value == "":
             errors.append(f"empty evaluation_metadata.{field}")
+
+    claim_level = metadata.get("claim_level")
+    if claim_level not in CLAIM_LEVELS:
+        errors.append(
+            "evaluation_metadata.claim_level must be one of "
+            f"{', '.join(CLAIM_LEVELS)}"
+        )
+
+    baseline_status = metadata.get("baseline_status")
+    if baseline_status not in BASELINE_STATUSES:
+        errors.append(
+            "evaluation_metadata.baseline_status must be one of "
+            f"{', '.join(BASELINE_STATUSES)}"
+        )
 
     for field in ("spreadsheet_count", "table_count", "qa_item_count"):
         value = metadata.get(field)
@@ -107,7 +134,39 @@ def validate_evaluation_metadata(metadata: Dict[str, Any]) -> List[str]:
         errors.append("evaluation_metadata.encoder_settings must be an object")
     if not isinstance(metadata.get("skip_reasons"), list):
         errors.append("evaluation_metadata.skip_reasons must be an array")
+
+    if claim_level == "paper-original":
+        _validate_paper_original_claim(metadata, errors)
     return errors
+
+
+def _validate_paper_original_claim(metadata: Dict[str, Any], errors: List[str]) -> None:
+    """Add strict errors for records claiming paper-comparable status."""
+    for field in (
+        "dataset_name",
+        "dataset_version",
+        "split_name",
+        "prompt_serializer",
+        "coordinate_mode",
+        "model_backend",
+        "metric_definition",
+        "baseline_name",
+        "baseline_version",
+        "baseline_status",
+    ):
+        value = metadata.get(field)
+        if value in (None, "", "unspecified", "unknown"):
+            errors.append(
+                "paper-original claim requires concrete "
+                f"evaluation_metadata.{field}"
+            )
+
+    if metadata.get("spreadsheet_count", 0) <= 0:
+        errors.append("paper-original claim requires spreadsheet_count > 0")
+    if metadata.get("table_count", 0) <= 0 and metadata.get("qa_item_count", 0) <= 0:
+        errors.append("paper-original claim requires table_count or qa_item_count > 0")
+    if not isinstance(metadata.get("encoder_settings"), dict) or not metadata["encoder_settings"]:
+        errors.append("paper-original claim requires non-empty encoder_settings")
 
 
 def validate_evaluation_record(record: Dict[str, Any]) -> List[str]:
@@ -167,6 +226,8 @@ def validate_finetune_eval_compatibility(
 
 
 __all__ = [
+    "BASELINE_STATUSES",
+    "CLAIM_LEVELS",
     "REQUIRED_METADATA_FIELDS",
     "build_evaluation_metadata",
     "validate_evaluation_metadata",

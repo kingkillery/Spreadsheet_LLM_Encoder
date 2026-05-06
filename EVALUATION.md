@@ -17,6 +17,13 @@ Do not describe a result as paper-comparable unless the run record includes
 compatible dataset split metadata, encoder settings, coordinate mode,
 prompt serializer, model/backend, baseline status, and metric definition.
 
+The metadata validator enforces this distinction with an explicit
+`claim_level` field. `synthetic` is the default for directory-scanned local
+fixtures, manifest-driven datasets default to `reconstructed`, and
+`paper-original` is accepted only when the result record carries concrete
+dataset, split, model/backend, prompt serializer, coordinate mode, baseline,
+metric, and encoder metadata.
+
 ## Paper Benchmark Shape
 
 The paper reports two main evaluation surfaces:
@@ -40,6 +47,7 @@ manifest file location.
 {
   "dataset_name": "synthetic_tables_v1",
   "dataset_version": "1",
+  "claim_level": "synthetic",
   "split_name": "test",
   "items": [
     {
@@ -74,6 +82,7 @@ match normalization.
 {
   "dataset_name": "synthetic_qa_v1",
   "dataset_version": "1",
+  "claim_level": "synthetic",
   "split_name": "test",
   "items": [
     {
@@ -128,4 +137,3 @@ evaluation record before making parity claims.
 - Binder is marked unavailable until a real adapter is implemented.
 - Missing optional dependencies should be reported as skip reasons, not as zero
   scores.
-

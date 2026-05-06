@@ -245,6 +245,7 @@ def main(
             task="spreadsheet_qa",
             dataset_name=dataset[0].get("dataset_name") if dataset else None,
             dataset_version=dataset[0].get("dataset_version", "unspecified") if dataset else "unspecified",
+            claim_level=dataset[0].get("claim_level", "synthetic") if dataset else "synthetic",
             split_name=dataset[0].get("split_name", "unspecified") if dataset else "unspecified",
             spreadsheet_count=len(dataset),
             table_count=0,
@@ -255,6 +256,7 @@ def main(
             model_backend=backend_name,
             metric_definition=QA_METRIC_DEFINITION,
             baseline_name="SpreadsheetLLM QA with TaPEx/Binder baselines",
+            baseline_status="partial",
             skip_reasons=skip_reasons,
         )
         record = {

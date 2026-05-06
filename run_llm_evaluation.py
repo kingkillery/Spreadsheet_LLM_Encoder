@@ -144,6 +144,7 @@ def main(
             task="table_detection",
             dataset_name=dataset_meta.get("dataset_name"),
             dataset_version=dataset_meta.get("dataset_version", "unspecified"),
+            claim_level=dataset_meta.get("claim_level", "synthetic"),
             split_name=dataset_meta.get("split_name", "unspecified"),
             spreadsheet_count=len(data),
             table_count=table_count,
@@ -154,6 +155,7 @@ def main(
             model_backend=backend_name,
             metric_definition="EoB-0 exact boundary matching; threshold=0.0",
             baseline_name="SpreadsheetLLM table detection",
+            baseline_status="run",
             skip_reasons=[],
         )
         record = {

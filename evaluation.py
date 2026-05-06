@@ -94,6 +94,7 @@ def load_table_detection_manifest(manifest_path: str) -> List[Dict[str, object]]
     dataset_name = manifest.get("dataset_name", "manifest")
     dataset_version = manifest.get("dataset_version", "unspecified")
     split_name = manifest.get("split_name", "unspecified")
+    claim_level = manifest.get("claim_level", "reconstructed")
     items = manifest.get("items")
     if not isinstance(items, list):
         raise ValueError("table-detection manifest must contain an items array")
@@ -116,6 +117,7 @@ def load_table_detection_manifest(manifest_path: str) -> List[Dict[str, object]]
             "dataset_name": dataset_name,
             "dataset_version": dataset_version,
             "split_name": split_name,
+            "claim_level": claim_level,
         })
     return dataset
 
@@ -243,6 +245,7 @@ def load_qa_manifest(manifest_path: str) -> List[Dict[str, object]]:
     dataset_name = manifest.get("dataset_name", "manifest")
     dataset_version = manifest.get("dataset_version", "unspecified")
     split_name = manifest.get("split_name", "unspecified")
+    claim_level = manifest.get("claim_level", "reconstructed")
     items = manifest.get("items")
     if not isinstance(items, list):
         raise ValueError("QA manifest must contain an items array")
@@ -264,6 +267,7 @@ def load_qa_manifest(manifest_path: str) -> List[Dict[str, object]]:
             "dataset_name": dataset_name,
             "dataset_version": dataset_version,
             "split_name": split_name,
+            "claim_level": claim_level,
         })
     return dataset
 

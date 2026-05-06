@@ -2,6 +2,8 @@ import os
 import openpyxl
 import json
 import logging
+import re
+from copy import copy
 from temp_helpers import (
     infer_cell_data_type,
     categorize_number_format,
@@ -18,6 +20,15 @@ from tokenizer import count_tokens, DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
+EXCEL_ERROR_VALUES = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
+_FORMULA_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"(?:(?:'(?P<quoted_sheet>[^']+)'|(?P<sheet>[A-Za-z_][A-Za-z0-9_ .]*))!)?"
+    r"\$?(?P<col>[A-Z]{1,3})\$?(?P<row>\d+)"
+    r"(?::\$?(?P<end_col>[A-Z]{1,3})\$?(?P<end_row>\d+))?",
+    re.IGNORECASE,
+)
+
 
 def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) -> float:
     """Return the compression ratio given original and compressed token counts."""
@@ -26,6 +37,226 @@ def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) ->
     if original_tokens == 0:
         return 1.0
     return original_tokens / compressed_tokens
+
+
+def _normalize_formula_reference(match, current_sheet: str) -> str:
+    sheet = match.group("quoted_sheet") or match.group("sheet") or current_sheet
+    col = match.group("col").upper()
+    row = match.group("row")
+    end_col = match.group("end_col")
+    end_row = match.group("end_row")
+    if end_col and end_row:
+        return f"{sheet}!{col}{row}:{end_col.upper()}{end_row}"
+    return f"{sheet}!{col}{row}"
+
+
+def extract_formula_references(formula: str, current_sheet: str) -> list:
+    """Return normalized workbook references used by an Excel formula."""
+    refs = []
+    seen = set()
+    for match in _FORMULA_REF_RE.finditer(formula or ""):
+        ref = _normalize_formula_reference(match, current_sheet)
+        if ref not in seen:
+            refs.append(ref)
+            seen.add(ref)
+    return refs
+
+
+def _formula_pattern(formula: str, current_sheet: str) -> str:
+    """Collapse references in a formula so fill-down families can be grouped."""
+    def repl(match):
+        ref = _normalize_formula_reference(match, current_sheet)
+        return "<RANGE>" if ":" in ref else "<REF>"
+
+    return _FORMULA_REF_RE.sub(repl, formula or "")
+
+
+def _json_safe_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def extract_formula_graph(formula_sheet, cached_sheet=None) -> dict:
+    """Extract lightweight formula dependencies and spreadsheet error cells.
+
+    ``formula_sheet`` must be loaded with ``data_only=False`` so formula text is
+    available. ``cached_sheet`` should be the same worksheet loaded with
+    ``data_only=True`` when cached formula results are available.
+    """
+    formulas = []
+    formula_errors = []
+    exact_groups = defaultdict(list)
+    pattern_groups = defaultdict(list)
+    sheet_name = formula_sheet.title
+
+    for row in range(1, formula_sheet.max_row + 1):
+        for col in range(1, formula_sheet.max_column + 1):
+            formula_cell = formula_sheet.cell(row=row, column=col)
+            value = formula_cell.value
+            ref = f"{get_column_letter(col)}{row}"
+            qualified_ref = f"{sheet_name}!{ref}"
+
+            cached_value = None
+            if cached_sheet is not None:
+                cached_value = cached_sheet.cell(row=row, column=col).value
+
+            if isinstance(value, str) and value in EXCEL_ERROR_VALUES:
+                formula_errors.append({"cell": qualified_ref, "error": value})
+
+            if not (isinstance(value, str) and value.startswith("=")):
+                continue
+
+            references = extract_formula_references(value, sheet_name)
+            cross_sheet_references = [
+                reference
+                for reference in references
+                if reference.split("!", 1)[0] != sheet_name
+            ]
+            errors = []
+            if isinstance(cached_value, str) and cached_value in EXCEL_ERROR_VALUES:
+                errors.append(cached_value)
+
+            formulas.append({
+                "cell": qualified_ref,
+                "formula": value,
+                "cached_value": _json_safe_value(cached_value),
+                "references": references,
+                "cross_sheet_references": cross_sheet_references,
+                "errors": errors,
+            })
+            exact_groups[value].append(qualified_ref)
+            pattern_groups[_formula_pattern(value, sheet_name)].append(qualified_ref)
+
+    repeated_formula_summaries = []
+    for formula, cells in sorted(exact_groups.items()):
+        if len(cells) > 1:
+            repeated_formula_summaries.append({
+                "kind": "exact",
+                "formula": formula,
+                "count": len(cells),
+                "cells": cells,
+            })
+    for pattern, cells in sorted(pattern_groups.items()):
+        if len(cells) > 1:
+            repeated_formula_summaries.append({
+                "kind": "pattern",
+                "formula_pattern": pattern,
+                "count": len(cells),
+                "cells": cells,
+            })
+
+    return {
+        "formulas": formulas,
+        "formula_errors": formula_errors,
+        "repeated_formula_summaries": repeated_formula_summaries,
+    }
+
+
+def _limit_to_positive_int(value, label):
+    if value is None:
+        return None
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
+
+
+def _bounded_dimensions(
+    rows,
+    cols,
+    max_rows_per_sheet=None,
+    max_cols_per_sheet=None,
+    max_cells_per_sheet=None,
+):
+    """Return bounded ``(rows, cols)`` while preserving full size by default."""
+    effective_rows = rows
+    effective_cols = cols
+    if max_rows_per_sheet is not None:
+        effective_rows = min(effective_rows, max_rows_per_sheet)
+    if max_cols_per_sheet is not None:
+        effective_cols = min(effective_cols, max_cols_per_sheet)
+
+    if max_cells_per_sheet is not None and effective_rows * effective_cols > max_cells_per_sheet:
+        if effective_cols > max_cells_per_sheet:
+            effective_cols = max_cells_per_sheet
+            effective_rows = 1
+        else:
+            effective_rows = max(1, max_cells_per_sheet // max(1, effective_cols))
+
+    return max(1, effective_rows), max(1, effective_cols)
+
+
+def _copy_bounded_sheet(source_sheet, max_row, max_col):
+    """Copy a bounded top-left worksheet region into a normal worksheet."""
+    wb = openpyxl.Workbook()
+    target = wb.active
+    target.title = source_sheet.title
+
+    for row in range(1, max_row + 1):
+        for col in range(1, max_col + 1):
+            source_cell = source_sheet.cell(row=row, column=col)
+            target_cell = target.cell(row=row, column=col, value=source_cell.value)
+            if source_cell.has_style:
+                target_cell.font = copy(source_cell.font)
+                target_cell.fill = copy(source_cell.fill)
+                target_cell.border = copy(source_cell.border)
+                target_cell.alignment = copy(source_cell.alignment)
+                target_cell.protection = copy(source_cell.protection)
+            target_cell.number_format = source_cell.number_format
+
+    for merged_range in source_sheet.merged_cells.ranges:
+        if merged_range.max_row <= max_row and merged_range.max_col <= max_col:
+            target.merge_cells(str(merged_range))
+    return target
+
+
+def _sheet_processing_plan(
+    sheet,
+    *,
+    max_rows_per_sheet=None,
+    max_cols_per_sheet=None,
+    max_cells_per_sheet=None,
+    sheet_limit_action="truncate",
+):
+    if sheet_limit_action not in {"truncate", "skip", "error"}:
+        raise ValueError("sheet_limit_action must be 'truncate', 'skip', or 'error'")
+
+    original_rows = sheet.max_row or 1
+    original_cols = sheet.max_column or 1
+    effective_rows, effective_cols = _bounded_dimensions(
+        original_rows,
+        original_cols,
+        max_rows_per_sheet=max_rows_per_sheet,
+        max_cols_per_sheet=max_cols_per_sheet,
+        max_cells_per_sheet=max_cells_per_sheet,
+    )
+    truncated = effective_rows < original_rows or effective_cols < original_cols
+    metadata = {
+        "status": "encoded",
+        "limit_action": sheet_limit_action,
+        "truncated": truncated,
+        "original_rows": original_rows,
+        "original_cols": original_cols,
+        "original_cells": original_rows * original_cols,
+        "effective_rows": effective_rows,
+        "effective_cols": effective_cols,
+        "effective_cells": effective_rows * effective_cols,
+        "encoded_range": f"A1:{get_column_letter(effective_cols)}{effective_rows}",
+    }
+    if truncated:
+        metadata["reason"] = "sheet exceeds configured row/column/cell limits"
+        if sheet_limit_action == "skip":
+            metadata["status"] = "skipped"
+            metadata["encoded_range"] = None
+        elif sheet_limit_action == "error":
+            raise ValueError(
+                f"Sheet '{sheet.title}' exceeds configured limits: "
+                f"{original_rows}x{original_cols} -> {effective_rows}x{effective_cols}"
+            )
+    return effective_rows, effective_cols, metadata
 
 
 def spreadsheet_llm_encode(
@@ -37,6 +268,10 @@ def spreadsheet_llm_encode(
     paper_strict=False,
     data_only=True,
     tokenizer_model=DEFAULT_MODEL,
+    max_rows_per_sheet=None,
+    max_cols_per_sheet=None,
+    max_cells_per_sheet=None,
+    sheet_limit_action="truncate",
 ):
     """
     Convert an Excel file to SpreadsheetLLM format or a vanilla markdown-like format.
@@ -58,6 +293,16 @@ def spreadsheet_llm_encode(
             text. Defaults to True (paper expects user-visible values).
         tokenizer_model (str, optional): Model name for tokenizer-based
             compression metrics. Defaults to ``"gpt-4"``.
+        max_rows_per_sheet (int, optional): When set, cap each sheet to this
+            many rows in bounded mode.
+        max_cols_per_sheet (int, optional): When set, cap each sheet to this
+            many columns in bounded mode.
+        max_cells_per_sheet (int, optional): When set, cap each sheet to this
+            many cells by reducing the effective row count after row/column
+            caps are applied.
+        sheet_limit_action (str, optional): What to do when a sheet exceeds
+            the configured caps: ``"truncate"`` (default), ``"skip"``, or
+            ``"error"``.
 
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
@@ -66,12 +311,19 @@ def spreadsheet_llm_encode(
         return vanilla_encode(excel_path, output_path)
     if paper_strict:
         compress_homogeneous = False
+    max_rows_per_sheet = _limit_to_positive_int(max_rows_per_sheet, "max_rows_per_sheet")
+    max_cols_per_sheet = _limit_to_positive_int(max_cols_per_sheet, "max_cols_per_sheet")
+    max_cells_per_sheet = _limit_to_positive_int(max_cells_per_sheet, "max_cells_per_sheet")
+    if sheet_limit_action not in {"truncate", "skip", "error"}:
+        raise ValueError("sheet_limit_action must be 'truncate', 'skip', or 'error'")
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
         # `data_only=True` returns cached values from formulas (paper-aligned).
         # Number-format strings are still preserved on the cell metadata.
         workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
+        formula_workbook = openpyxl.load_workbook(excel_path, data_only=False)
+        cached_workbook = workbook if data_only else openpyxl.load_workbook(excel_path, data_only=True)
         logger.info(
             f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
         )
@@ -84,15 +336,64 @@ def spreadsheet_llm_encode(
 
     sheets_encoding = {}
     compression_metrics = {"sheets": {}}
+    sheet_processing = {
+        "mode": (
+            "bounded"
+            if any(v is not None for v in (max_rows_per_sheet, max_cols_per_sheet, max_cells_per_sheet))
+            else "full"
+        ),
+        "limits": {
+            "max_rows_per_sheet": max_rows_per_sheet,
+            "max_cols_per_sheet": max_cols_per_sheet,
+            "max_cells_per_sheet": max_cells_per_sheet,
+            "sheet_limit_action": sheet_limit_action,
+        },
+        "sheets": {},
+    }
     overall_orig = overall_anchor = overall_index = overall_format = overall_final = 0
 
     for sheet_name in workbook.sheetnames:
         logger.info(f"\\nProcessing sheet: {sheet_name}")
-        sheet = workbook[sheet_name]
+        original_sheet = workbook[sheet_name]
 
-        if sheet.max_row <= 1 and sheet.max_column <= 1:
+        if original_sheet.max_row <= 1 and original_sheet.max_column <= 1:
             logger.info(f"Sheet '{sheet_name}' appears to be empty. Skipping.")
             continue
+
+        effective_rows, effective_cols, processing_meta = _sheet_processing_plan(
+            original_sheet,
+            max_rows_per_sheet=max_rows_per_sheet,
+            max_cols_per_sheet=max_cols_per_sheet,
+            max_cells_per_sheet=max_cells_per_sheet,
+            sheet_limit_action=sheet_limit_action,
+        )
+        sheet_processing["sheets"][sheet_name] = processing_meta
+        if processing_meta["status"] == "skipped":
+            logger.info(
+                "Skipping sheet '%s' because it exceeds configured limits: %s rows x %s cols",
+                sheet_name,
+                processing_meta["original_rows"],
+                processing_meta["original_cols"],
+            )
+            continue
+
+        sheet = original_sheet
+        formula_sheet = formula_workbook[sheet_name] if sheet_name in formula_workbook.sheetnames else None
+        cached_sheet = cached_workbook[sheet_name] if sheet_name in cached_workbook.sheetnames else None
+        if processing_meta["truncated"]:
+            logger.info(
+                "Truncating sheet '%s' from %s rows x %s cols to %s rows x %s cols",
+                sheet_name,
+                processing_meta["original_rows"],
+                processing_meta["original_cols"],
+                effective_rows,
+                effective_cols,
+            )
+            sheet = _copy_bounded_sheet(original_sheet, effective_rows, effective_cols)
+            if formula_sheet is not None:
+                formula_sheet = _copy_bounded_sheet(formula_sheet, effective_rows, effective_cols)
+            if cached_sheet is not None:
+                cached_sheet = _copy_bounded_sheet(cached_sheet, effective_rows, effective_cols)
 
         logger.info(
             f"Sheet dimensions: {sheet.max_row} rows × {sheet.max_column} columns"
@@ -198,6 +499,17 @@ def spreadsheet_llm_encode(
             "coord_map": coord_map,
             "encoding_mode": "paper_strict" if paper_strict else "pragmatic",
         }
+        if formula_sheet is not None:
+            formula_graph = extract_formula_graph(
+                formula_sheet,
+                cached_sheet,
+            )
+            if (
+                formula_graph["formulas"]
+                or formula_graph["formula_errors"]
+                or formula_graph["repeated_formula_summaries"]
+            ):
+                sheet_encoding["formula_graph"] = formula_graph
 
         # Final stage tokens: the paper-faithful compressed prompt with format
         # substitution and compact-coordinate remapping applied.
@@ -261,6 +573,7 @@ def spreadsheet_llm_encode(
         "file_name": os.path.basename(excel_path),
         "sheets": sheets_encoding,
         "compression_metrics": compression_metrics,
+        "sheet_processing": sheet_processing,
     }
 
     if output_path:
@@ -433,6 +746,59 @@ def _edge_density(sheet, r1, c1, r2, c2):
     return populated / len(edge_cells)
 
 
+def _populated_cols_in_row(sheet, row_idx):
+    cols = []
+    for col_idx in range(1, sheet.max_column + 1):
+        value = sheet.cell(row=row_idx, column=col_idx).value
+        if value is not None and str(value).strip() != "":
+            cols.append(col_idx)
+    return cols
+
+
+def _contiguous_groups(indices):
+    if not indices:
+        return []
+    groups = []
+    start = prev = indices[0]
+    for idx in indices[1:]:
+        if idx == prev + 1:
+            prev = idx
+            continue
+        groups.append((start, prev))
+        start = prev = idx
+    groups.append((start, prev))
+    return groups
+
+
+def _bounded_header_region_candidates(sheet):
+    """Find table-like rectangles without composing every boundary pair.
+
+    The Appendix C-inspired boundary search can become expensive when many
+    rows have unique profiles. For larger candidate grids, use styled/header
+    rows as seeds and grow each contiguous header band downward until the band
+    becomes blank.
+    """
+    candidates = []
+    for row_idx in range(1, sheet.max_row + 1):
+        if not is_header_row(sheet, row_idx):
+            continue
+        for c1, c2 in _contiguous_groups(_populated_cols_in_row(sheet, row_idx)):
+            end_row = row_idx
+            for data_row in range(row_idx + 1, sheet.max_row + 1):
+                populated = False
+                for col_idx in range(c1, c2 + 1):
+                    value = sheet.cell(row=data_row, column=col_idx).value
+                    if value is not None and str(value).strip() != "":
+                        populated = True
+                        break
+                if not populated:
+                    break
+                end_row = data_row
+            if end_row > row_idx and c2 > c1:
+                candidates.append((row_idx, c1, end_row, c2))
+    return candidates
+
+
 def find_boundary_candidates(sheet):
     """
     Identify row/column boundary candidates using enhanced heterogeneity heuristics
@@ -476,11 +842,18 @@ def find_boundary_candidates(sheet):
     if row_candidates and col_candidates:
         rows = sorted(list(row_candidates))
         cols = sorted(list(col_candidates))
-        for i in range(len(rows)):
-            for j in range(i + 1, len(rows)):
-                for k in range(len(cols)):
-                    for l in range(k + 1, len(cols)):
-                        candidates.append((rows[i], cols[k], rows[j], cols[l]))
+        candidate_count = (
+            (len(rows) * (len(rows) - 1) // 2)
+            * (len(cols) * (len(cols) - 1) // 2)
+        )
+        if candidate_count > 2_000:
+            candidates = _bounded_header_region_candidates(sheet)
+        else:
+            for i in range(len(rows)):
+                for j in range(i + 1, len(rows)):
+                    for k in range(len(cols)):
+                        for l in range(k + 1, len(cols)):
+                            candidates.append((rows[i], cols[k], rows[j], cols[l]))
 
     # Step 3: Filter unreasonable candidates
     candidates = filter_unreasonable_candidates(sheet, candidates)
@@ -1005,6 +1378,36 @@ def main():
         default=DEFAULT_MODEL,
         help=f"Model name passed to tiktoken for token counts (default: {DEFAULT_MODEL}).",
     )
+    parser.add_argument(
+        "--max-rows-per-sheet",
+        type=int,
+        default=None,
+        help="Bounded mode: encode at most this many rows from each sheet.",
+    )
+    parser.add_argument(
+        "--max-cols-per-sheet",
+        type=int,
+        default=None,
+        help="Bounded mode: encode at most this many columns from each sheet.",
+    )
+    parser.add_argument(
+        "--max-cells-per-sheet",
+        type=int,
+        default=None,
+        help=(
+            "Bounded mode: encode at most this many cells per sheet by reducing "
+            "the effective row count after row/column caps are applied."
+        ),
+    )
+    parser.add_argument(
+        "--sheet-limit-action",
+        choices=["truncate", "skip", "error"],
+        default="truncate",
+        help=(
+            "Bounded mode behavior for sheets over configured limits: "
+            "truncate, skip, or error (default: truncate)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1022,6 +1425,10 @@ def main():
         compress_homogeneous=not args.no_compress_homogeneous,
         paper_strict=args.paper_strict,
         tokenizer_model=args.tokenizer_model,
+        max_rows_per_sheet=args.max_rows_per_sheet,
+        max_cols_per_sheet=args.max_cols_per_sheet,
+        max_cells_per_sheet=args.max_cells_per_sheet,
+        sheet_limit_action=args.sheet_limit_action,
     )
 
     if result is not None and not args.vanilla:

@@ -6,6 +6,8 @@ from openpyxl.styles import Font, PatternFill
 from Spreadsheet_LLM_Encoder import (
     spreadsheet_llm_encode,
     create_inverted_index,
+    extract_formula_graph,
+    extract_formula_references,
     find_boundary_candidates,
     aggregate_regions_dfs,
     vanilla_encode,
@@ -234,6 +236,171 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         result = spreadsheet_llm_encode(self.test_file)
         self.assertIsNotNone(result)
         self.assertIn("Sheet1", result["sheets"])
+
+    def test_extract_formula_references_normalizes_local_and_cross_sheet_refs(self):
+        refs = extract_formula_references("=SUM(B2:C3)+'Data Sheet'!D4+Aux!E5", "Sheet1")
+
+        self.assertEqual(
+            refs,
+            ["Sheet1!B2:C3", "Data Sheet!D4", "Aux!E5"],
+        )
+
+    def test_formula_graph_captures_dependencies_errors_and_repeated_patterns(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "Item"
+        ws["B1"] = "Units"
+        ws["C1"] = "Price"
+        ws["D1"] = "Total"
+        ws["B2"] = 2
+        ws["C2"] = 5
+        ws["D2"] = "=B2*C2"
+        ws["B3"] = 3
+        ws["C3"] = 7
+        ws["D3"] = "=B3*C3"
+        ws["D4"] = "=SUM(D2:D3)"
+        ws["E1"] = "#REF!"
+        aux = wb.create_sheet("Aux")
+        aux["A1"] = 10
+        ws["F1"] = "=Aux!A1+D4"
+
+        graph = extract_formula_graph(ws)
+
+        formulas = {item["cell"]: item for item in graph["formulas"]}
+        self.assertEqual(formulas["Sheet1!D2"]["references"], ["Sheet1!B2", "Sheet1!C2"])
+        self.assertEqual(formulas["Sheet1!D4"]["references"], ["Sheet1!D2:D3"])
+        self.assertEqual(formulas["Sheet1!F1"]["cross_sheet_references"], ["Aux!A1"])
+        self.assertIn({"cell": "Sheet1!E1", "error": "#REF!"}, graph["formula_errors"])
+        self.assertTrue(
+            any(
+                summary["kind"] == "pattern"
+                and summary["formula_pattern"] == "=<REF>*<REF>"
+                and summary["cells"] == ["Sheet1!D2", "Sheet1!D3"]
+                for summary in graph["repeated_formula_summaries"]
+            )
+        )
+
+    def test_spreadsheet_llm_encode_includes_formula_graph(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "Units"
+        ws["B1"] = "Price"
+        ws["C1"] = "Total"
+        for cell in ("A1", "B1", "C1"):
+            ws[cell].font = Font(bold=True)
+        ws["A2"] = 2
+        ws["B2"] = 5
+        ws["C2"] = "=A2*B2"
+        path = "formula_graph_encoding.xlsx"
+        out_path = "formula_graph_encoding.json"
+        wb.save(path)
+
+        try:
+            result = spreadsheet_llm_encode(path, out_path, k=1, paper_strict=True)
+            with open(out_path, encoding="utf-8") as fh:
+                saved = json.load(fh)
+        finally:
+            os.remove(path)
+            if os.path.exists(out_path):
+                os.remove(out_path)
+
+        graph = result["sheets"]["Sheet1"]["formula_graph"]
+        self.assertEqual(graph["formulas"][0]["cell"], "Sheet1!C2")
+        self.assertEqual(graph["formulas"][0]["formula"], "=A2*B2")
+        self.assertEqual(graph["formulas"][0]["references"], ["Sheet1!A2", "Sheet1!B2"])
+        self.assertEqual(
+            saved["sheets"]["Sheet1"]["formula_graph"]["formulas"][0]["cell"],
+            "Sheet1!C2",
+        )
+
+    def test_bounded_mode_truncates_large_sheet_and_records_metadata(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Large"
+        for col in range(1, 41):
+            cell = ws.cell(row=1, column=col, value=f"H{col}")
+            cell.font = Font(bold=True)
+        for row in range(2, 302):
+            for col in range(1, 41):
+                ws.cell(row=row, column=col, value=row * col)
+        path = "large_bounded.xlsx"
+        out_path = "large_bounded.json"
+        wb.save(path)
+
+        try:
+            result = spreadsheet_llm_encode(
+                path,
+                out_path,
+                k=1,
+                paper_strict=True,
+                max_cells_per_sheet=1000,
+            )
+            with open(out_path, encoding="utf-8") as fh:
+                saved = json.load(fh)
+        finally:
+            os.remove(path)
+            if os.path.exists(out_path):
+                os.remove(out_path)
+
+        processing = result["sheet_processing"]
+        sheet_meta = processing["sheets"]["Large"]
+        self.assertEqual(processing["mode"], "bounded")
+        self.assertEqual(sheet_meta["status"], "encoded")
+        self.assertTrue(sheet_meta["truncated"])
+        self.assertEqual(sheet_meta["original_rows"], 301)
+        self.assertEqual(sheet_meta["original_cols"], 40)
+        self.assertLessEqual(sheet_meta["effective_cells"], 1000)
+        self.assertEqual(saved["sheet_processing"]["sheets"]["Large"], sheet_meta)
+        self.assertIn("Large", result["sheets"])
+
+    def test_bounded_mode_can_skip_large_sheet_and_record_reason(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Large"
+        for col in range(1, 8):
+            ws.cell(row=1, column=col, value=f"H{col}").font = Font(bold=True)
+        for row in range(2, 60):
+            for col in range(1, 8):
+                ws.cell(row=row, column=col, value=row + col)
+        path = "large_skip.xlsx"
+        wb.save(path)
+
+        try:
+            result = spreadsheet_llm_encode(
+                path,
+                k=1,
+                max_rows_per_sheet=10,
+                sheet_limit_action="skip",
+            )
+        finally:
+            os.remove(path)
+
+        self.assertNotIn("Large", result["sheets"])
+        sheet_meta = result["sheet_processing"]["sheets"]["Large"]
+        self.assertEqual(sheet_meta["status"], "skipped")
+        self.assertTrue(sheet_meta["truncated"])
+        self.assertIn("reason", sheet_meta)
+
+    def test_bounded_mode_can_error_on_large_sheet(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Large"
+        ws["A1"] = "Header"
+        ws["A2"] = "Value"
+        path = "large_error.xlsx"
+        wb.save(path)
+
+        try:
+            with self.assertRaises(ValueError):
+                spreadsheet_llm_encode(
+                    path,
+                    max_rows_per_sheet=1,
+                    sheet_limit_action="error",
+                )
+        finally:
+            os.remove(path)
 
 if __name__ == '__main__':
     unittest.main()

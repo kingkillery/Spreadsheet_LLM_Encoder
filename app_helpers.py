@@ -51,13 +51,24 @@ def detect_tables_in_sheet(sheet: openpyxl.worksheet.worksheet.Worksheet) -> Lis
         num_string_cells = 0
         current_min_col = max_col + 1
         current_max_col = min_col - 1
+        populated_header_cols = []
 
         for c_idx in range(min_col, max_col + 1):
             cell = sheet.cell(row=r_idx, column=c_idx)
             if cell.value is not None and str(cell.value).strip() != "":
+                header_cols_for_cell = [c_idx]
+                for merged_range in sheet.merged_cells.ranges:
+                    if cell.coordinate in merged_range:
+                        header_cols_for_cell = list(
+                            range(merged_range.min_col, merged_range.max_col + 1)
+                        )
+                        break
                 num_populated_cells += 1
-                current_min_col = min(current_min_col, c_idx)
-                current_max_col = max(current_max_col, c_idx)
+                for header_col in header_cols_for_cell:
+                    if header_col not in populated_header_cols:
+                        populated_header_cols.append(header_col)
+                current_min_col = min(current_min_col, min(header_cols_for_cell))
+                current_max_col = max(current_max_col, max(header_cols_for_cell))
 
                 if cell.font and cell.font.bold:
                     num_bold += 1
@@ -93,54 +104,69 @@ def detect_tables_in_sheet(sheet: openpyxl.worksheet.worksheet.Worksheet) -> Lis
 
         if is_header:
             header_row_idx = r_idx
-            header_min_col = current_min_col
-            header_max_col = current_max_col
-            table_min_col = header_min_col
-            table_max_col = header_max_col
-            data_end_row_idx = header_row_idx
+            header_groups = []
+            group_start = populated_header_cols[0]
+            prev_col = populated_header_cols[0]
+            for col_idx in populated_header_cols[1:]:
+                if col_idx == prev_col + 1:
+                    prev_col = col_idx
+                    continue
+                header_groups.append((group_start, prev_col))
+                group_start = prev_col = col_idx
+            header_groups.append((group_start, prev_col))
 
-            for data_r_idx in range(header_row_idx + 1, max_row + 1):
-                data_populated = 0
-                data_min_col = max_col + 1
-                data_max_col = min_col - 1
+            max_data_end_row_idx = header_row_idx
+            for header_min_col, header_max_col in header_groups:
+                table_min_col = header_min_col
+                table_max_col = header_max_col
+                data_end_row_idx = header_row_idx
 
-                for c_idx_data in range(min_col, max_col + 1):
-                    cell_data = sheet.cell(row=data_r_idx, column=c_idx_data)
-                    if cell_data.value is not None and str(cell_data.value).strip() != "":
-                        data_populated += 1
-                        data_min_col = min(data_min_col, c_idx_data)
-                        data_max_col = max(data_max_col, c_idx_data)
+                for data_r_idx in range(header_row_idx + 1, max_row + 1):
+                    data_populated = 0
+                    data_min_col = max_col + 1
+                    data_max_col = min_col - 1
 
-                if data_populated == 0:
-                    break
+                    for c_idx_data in range(header_min_col, header_max_col + 1):
+                        cell_data = sheet.cell(row=data_r_idx, column=c_idx_data)
+                        if cell_data.value is not None and str(cell_data.value).strip() != "":
+                            data_populated += 1
+                            data_min_col = min(data_min_col, c_idx_data)
+                            data_max_col = max(data_max_col, c_idx_data)
 
-                if (
-                    data_populated > 0
-                    and data_max_col >= table_min_col
-                    and data_min_col <= table_max_col
-                ):
+                    if data_populated == 0:
+                        break
+
                     data_end_row_idx = data_r_idx
                     table_min_col = min(table_min_col, data_min_col)
                     table_max_col = max(table_max_col, data_max_col)
-                else:
-                    break
 
-            if data_end_row_idx >= header_row_idx:
-                header_range = f"{get_column_letter(table_min_col)}{header_row_idx}:{get_column_letter(table_max_col)}{header_row_idx}"
-                data_range = None
-                if data_end_row_idx > header_row_idx:
-                    data_range = f"{get_column_letter(table_min_col)}{header_row_idx + 1}:{get_column_letter(table_max_col)}{data_end_row_idx}"
-                full_range = f"{get_column_letter(table_min_col)}{header_row_idx}:{get_column_letter(table_max_col)}{data_end_row_idx}"
+                if data_end_row_idx >= header_row_idx:
+                    header_range = (
+                        f"{get_column_letter(table_min_col)}{header_row_idx}:"
+                        f"{get_column_letter(table_max_col)}{header_row_idx}"
+                    )
+                    data_range = None
+                    if data_end_row_idx > header_row_idx:
+                        data_range = (
+                            f"{get_column_letter(table_min_col)}{header_row_idx + 1}:"
+                            f"{get_column_letter(table_max_col)}{data_end_row_idx}"
+                        )
+                    full_range = (
+                        f"{get_column_letter(table_min_col)}{header_row_idx}:"
+                        f"{get_column_letter(table_max_col)}{data_end_row_idx}"
+                    )
 
-                tables.append(
-                    {
-                        "full_range": full_range,
-                        "header_range": header_range,
-                        "data_range": data_range,
-                        "detection_method": "improved_heuristic_v1",
-                    }
-                )
-                r_idx = data_end_row_idx + 1
+                    tables.append(
+                        {
+                            "full_range": full_range,
+                            "header_range": header_range,
+                            "data_range": data_range,
+                            "detection_method": "improved_heuristic_v2_header_bands",
+                        }
+                    )
+                    max_data_end_row_idx = max(max_data_end_row_idx, data_end_row_idx)
+            if max_data_end_row_idx > header_row_idx:
+                r_idx = max_data_end_row_idx + 1
                 continue
         r_idx += 1
     return tables

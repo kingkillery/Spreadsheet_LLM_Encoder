@@ -58,6 +58,10 @@ Parameters:
 - `--vanilla`: Produce vanilla pair-string encoding instead of compressed (optional)
 - `--no-compress-homogeneous`: Retain all structural-anchor cells without pruning homogeneous rows/columns (optional)
 - `--tokenizer-model`: Model name for tokenizer-based compression metrics (optional, default="gpt-4")
+- `--max-rows-per-sheet`: Bounded mode row cap for very large sheets (optional)
+- `--max-cols-per-sheet`: Bounded mode column cap for very large sheets (optional)
+- `--max-cells-per-sheet`: Bounded mode cell cap per sheet after row/column caps are applied (optional)
+- `--sheet-limit-action`: Behavior for sheets over configured caps: `truncate`, `skip`, or `error` (default=`truncate`)
 
 The CLI prints compression ratios for each sheet and overall to stdout. These metrics are also stored in the output JSON under `compression_metrics` and emitted via the logger at INFO level.
 
@@ -82,6 +86,14 @@ encoding = spreadsheet_llm_encode(
     excel_path="path/to/your/spreadsheet.xlsx",
     vanilla=True,
     output_path="vanilla.txt"
+)
+
+# Bounded mode for large operational workbooks
+encoding = spreadsheet_llm_encode(
+    excel_path="path/to/large_workbook.xlsx",
+    output_path="bounded.json",
+    max_cells_per_sheet=50000,
+    sheet_limit_action="truncate",
 )
 ```
 
@@ -159,6 +171,20 @@ The encoder produces a JSON with this structure:
       "numeric_ranges": {
         "{format_definition}": ["B2:B8"]
       },
+      "formula_graph": {
+        "formulas": [
+          {
+            "cell": "Sheet1!D10",
+            "formula": "=SUM(D2:D9)",
+            "cached_value": 12800,
+            "references": ["Sheet1!D2:D9"],
+            "cross_sheet_references": [],
+            "errors": []
+          }
+        ],
+        "formula_errors": [],
+        "repeated_formula_summaries": []
+      },
       "coord_map": {
         "rows": {1: 1, 5: 2, 10: 3},
         "cols": {1: 1, 3: 2, 6: 3},
@@ -166,11 +192,41 @@ The encoder produces a JSON with this structure:
         "cols_inv": {1: 1, 2: 3, 3: 6}
       }
     }
+  },
+  "sheet_processing": {
+    "mode": "bounded",
+    "limits": {
+      "max_rows_per_sheet": null,
+      "max_cols_per_sheet": null,
+      "max_cells_per_sheet": 50000,
+      "sheet_limit_action": "truncate"
+    },
+    "sheets": {
+      "Sheet1": {
+        "status": "encoded",
+        "truncated": true,
+        "original_rows": 5000,
+        "original_cols": 80,
+        "effective_rows": 625,
+        "effective_cols": 80,
+        "encoded_range": "A1:CB625"
+      }
+    }
   }
 }
 ```
 
 The `coord_map` field enables round-trip conversion between original workbook coordinates and the compact remapped space used in the paper-faithful prompts.
+
+The optional `formula_graph` field is emitted for sheets containing formulas or
+spreadsheet error cells. It records formula cells, formula strings, cached
+values when Excel stored them, referenced ranges, cross-sheet references,
+formula errors, and repeated-formula summaries.
+
+The `sheet_processing` field records whether the encoder ran in full or
+bounded mode. When row, column, or cell caps are configured, each sheet records
+its original dimensions, encoded dimensions, encoded range, truncation status,
+and skip reason when `--sheet-limit-action skip` is used.
 
 ### Compression Metrics
 
@@ -209,6 +265,11 @@ The baseline (`original_tokens`) uses the paper's vanilla pair-string format (in
 The repository includes a reproducibility-oriented evaluation scaffold for SpreadsheetLLM-style experiments. The scripts can run synthetic or user-supplied `.xlsx` plus JSON datasets, but bundled results are not directly comparable to the paper unless the paper datasets, splits, model procedures, and baselines are reconstructed.
 
 See [EVALUATION.md](EVALUATION.md) for manifest formats, claim levels, answer normalization, baseline status, and paper-comparison rules.
+
+Every written evaluation record includes an explicit `claim_level` of
+`synthetic`, `reconstructed`, or `paper-original`. The validator rejects
+paper-original claims unless concrete dataset, split, model/backend, prompt
+serializer, coordinate mode, baseline, metric, and encoder metadata are present.
 
 ### Table Detection Benchmark
 
@@ -270,6 +331,13 @@ The vanilla encoding includes **all sheets** in the workbook, each preceded by a
 
 This section documents changes made to align the implementation with the paper (arXiv:2407.09025):
 
+- **Paper-parity fixtures**: `test_paper_parity_fixtures.py` generates ten
+  deterministic synthetic `.xlsx` workbooks covering merged headers,
+  side-by-side tables, notes above tables, sparse sheets, date/year headers,
+  totals, formulas, multi-table layouts, formatted numbers, and hidden rows.
+  Each fixture asserts structural anchors, compressed prompt evidence, detected
+  ranges, and coordinate remapping.
+
 ### Paper Fidelity Matrix
 
 | Area | Status | Notes |
@@ -292,6 +360,11 @@ This section documents changes made to align the implementation with the paper (
 - **Coordinate remapping**: Each sheet encoding now includes a `coord_map` field mapping original↔compact coordinates, enabling round-trip conversion between predicted compact ranges and original workbook addresses.
 - **Paper serializers**: New `paper_serializers` module exports `to_paper_vanilla_prompt`, `to_paper_compressed_prompt`, and `to_stage2_uncompressed_prompt` for faithful prompt generation.
 - **LLM backend abstraction**: `chain_of_spreadsheet.configure_backend(backend)` accepts any `LLMBackend` (any `Callable[[str], str]`). Reference implementations provided: `OpenAIBackend`, `EchoBackend`.
+- **Bounded large-workbook mode**: Use `--max-rows-per-sheet`,
+  `--max-cols-per-sheet`, `--max-cells-per-sheet`, and
+  `--sheet-limit-action` to truncate, skip, or fail fast on sheets whose used
+  range is too large for interactive encoding. Full-fidelity behavior remains
+  the default when no caps are supplied.
 
 **Not yet implemented** (per the original paper):
 - Paper datasets are not bundled.
