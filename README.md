@@ -207,6 +207,8 @@ The baseline (`original_tokens`) uses the paper's vanilla pair-string format (in
 
 The repository includes a reproducibility-oriented evaluation scaffold for SpreadsheetLLM-style experiments. The scripts can run synthetic or user-supplied `.xlsx` plus JSON datasets, but bundled results are not directly comparable to the paper unless the paper datasets, splits, model procedures, and baselines are reconstructed.
 
+See [EVALUATION.md](EVALUATION.md) for manifest formats, claim levels, answer normalization, baseline status, and paper-comparison rules.
+
 ### Table Detection Benchmark
 
 -   **Dataset**: The framework uses spreadsheet files (`.xlsx`) and corresponding JSON annotations, which is the correct format for evaluating SpreadsheetLLM. A new data loader `load_spreadsheet_dataset` is included in `evaluation.py`.
