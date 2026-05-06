@@ -1,0 +1,1 @@
+(Product|A1)(Sales|B1)(Region|D1)(Cost|E1)(A|A2)(IntNum|B2:B3)(West|D2)(IntNum|E2:E3)(B|A3)(East|D3)(Owner|A6)(Open|B6)(Mia|A7)(IntNum|B7:B8)(Leo|A8)

@@ -1,0 +1,1 @@
+(Item|A1)(Units|B1)(Price|C1)(Total|D1)(Aux Total|E1)(A|A2)(IntNum|B2:C3)(B|A3)(Grand Total|A4)

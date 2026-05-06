@@ -1,0 +1,1 @@
+(Name|A1)(Value|B1)(Flag|C1)(Internal|A2)(IntNum|B2:B3)(hide|C2)(External|A3)(show|C3)

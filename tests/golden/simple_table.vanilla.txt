@@ -1,0 +1,1 @@
+A1,Region|B1,Revenue|C1,Cost|A2,West|B2,100|C2,40|A3,East|B3,120|C3,55

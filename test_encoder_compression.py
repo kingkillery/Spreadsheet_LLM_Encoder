@@ -36,6 +36,10 @@ def test_numeric_range_aggregation():
         file_path = os.path.join(tmpdir, "num.xlsx")
         create_workbook_numeric_region(file_path)
         result = spreadsheet_llm_encode(file_path)
+        tokenizer_meta = result["compression_metrics"]["tokenizer"]
+        assert tokenizer_meta["model"]
+        assert tokenizer_meta["backend"] in {"tiktoken", "char_approximation"}
+        assert isinstance(tokenizer_meta["fallback"], bool)
         ranges = result['sheets']['Sheet']['numeric_ranges']
         assert isinstance(ranges, dict)
 

@@ -1,0 +1,1 @@
+A1,Date|B1,Revenue|C1,Rate|D1,Email|E1,Scientific|A2,2026-01-01|B2,1200.25|C2,0.15|D2,alpha@example.com|E2,120000|A3,2026-02-01|B3,900.5|C3,0.2|D3,beta@example.com|E3,3400000

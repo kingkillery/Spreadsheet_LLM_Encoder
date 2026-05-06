@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 import sys
 
 import paper_serializers
-from tokenizer import count_tokens, DEFAULT_MODEL
+from tokenizer import count_tokens, DEFAULT_MODEL, tokenizer_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +335,10 @@ def spreadsheet_llm_encode(
         return None
 
     sheets_encoding = {}
-    compression_metrics = {"sheets": {}}
+    compression_metrics = {
+        "tokenizer": tokenizer_metadata(tokenizer_model),
+        "sheets": {},
+    }
     sheet_processing = {
         "mode": (
             "bounded"

@@ -1,0 +1,1 @@
+(Date|A1)(Revenue|B1)(Rate|C1)(Email|D1)(Scientific|E1)(2026-01-01|A2)($#,##0.00|B2:B3)(PercentageNum|C2:C3)(EmailData|D2:D3)(0.00E+00|E2:E3)(2026-02-01|A3)

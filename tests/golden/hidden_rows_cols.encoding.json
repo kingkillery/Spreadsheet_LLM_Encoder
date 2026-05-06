@@ -1,0 +1,109 @@
+{
+  "file_name": "hidden_rows_cols.xlsx",
+  "sheet_processing": {
+    "limits": {
+      "max_cells_per_sheet": null,
+      "max_cols_per_sheet": null,
+      "max_rows_per_sheet": null,
+      "sheet_limit_action": "truncate"
+    },
+    "mode": "full",
+    "sheets": {
+      "Sheet1": {
+        "effective_cells": 9,
+        "effective_cols": 3,
+        "effective_rows": 3,
+        "encoded_range": "A1:C3",
+        "limit_action": "truncate",
+        "original_cells": 9,
+        "original_cols": 3,
+        "original_rows": 3,
+        "status": "encoded",
+        "truncated": false
+      }
+    }
+  },
+  "sheets": {
+    "Sheet1": {
+      "cells": {
+        "1": [
+          "B2"
+        ],
+        "2": [
+          "B3"
+        ],
+        "External": [
+          "A3"
+        ],
+        "Flag": [
+          "C1"
+        ],
+        "Internal": [
+          "A2"
+        ],
+        "Name": [
+          "A1"
+        ],
+        "Value": [
+          "B1"
+        ],
+        "hide": [
+          "C2"
+        ],
+        "show": [
+          "C3"
+        ]
+      },
+      "coord_map": {
+        "cols": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        },
+        "cols_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        },
+        "rows": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        },
+        "rows_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        }
+      },
+      "encoding_mode": "paper_strict",
+      "formats": {
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "B2:B3"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"text\"}": [
+          "A1:C1",
+          "A2:A3",
+          "C2:C3"
+        ]
+      },
+      "numeric_ranges": {
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "B2:B3"
+        ]
+      },
+      "structural_anchors": {
+        "columns": [
+          "A",
+          "B",
+          "C"
+        ],
+        "rows": [
+          1,
+          2,
+          3
+        ]
+      }
+    }
+  }
+}

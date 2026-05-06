@@ -1,0 +1,139 @@
+{
+  "file_name": "date_currency_percent.xlsx",
+  "sheet_processing": {
+    "limits": {
+      "max_cells_per_sheet": null,
+      "max_cols_per_sheet": null,
+      "max_rows_per_sheet": null,
+      "sheet_limit_action": "truncate"
+    },
+    "mode": "full",
+    "sheets": {
+      "Sheet1": {
+        "effective_cells": 15,
+        "effective_cols": 5,
+        "effective_rows": 3,
+        "encoded_range": "A1:E3",
+        "limit_action": "truncate",
+        "original_cells": 15,
+        "original_cols": 5,
+        "original_rows": 3,
+        "status": "encoded",
+        "truncated": false
+      }
+    }
+  },
+  "sheets": {
+    "Sheet1": {
+      "cells": {
+        "0.15": [
+          "C2"
+        ],
+        "0.2": [
+          "C3"
+        ],
+        "1200.25": [
+          "B2"
+        ],
+        "120000": [
+          "E2"
+        ],
+        "2026-01-01": [
+          "A2"
+        ],
+        "2026-02-01": [
+          "A3"
+        ],
+        "3400000": [
+          "E3"
+        ],
+        "900.5": [
+          "B3"
+        ],
+        "Date": [
+          "A1"
+        ],
+        "Email": [
+          "D1"
+        ],
+        "Rate": [
+          "C1"
+        ],
+        "Revenue": [
+          "B1"
+        ],
+        "Scientific": [
+          "E1"
+        ],
+        "alpha@example.com": [
+          "D2"
+        ],
+        "beta@example.com": [
+          "D3"
+        ]
+      },
+      "coord_map": {
+        "cols": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5
+        },
+        "cols_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5
+        },
+        "rows": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        },
+        "rows_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3
+        }
+      },
+      "encoding_mode": "paper_strict",
+      "formats": {
+        "{\"nfs\": \"$#,##0.00\", \"type\": \"currency\"}": [
+          "B2:B3"
+        ],
+        "{\"nfs\": \"0.00%\", \"type\": \"percentage\"}": [
+          "C2:C3"
+        ],
+        "{\"nfs\": \"0.00E+00\", \"type\": \"scientific_notation\"}": [
+          "E2:E3"
+        ],
+        "{\"nfs\": \"@\", \"type\": \"email\"}": [
+          "D2:D3"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"text\"}": [
+          "A1:E1"
+        ],
+        "{\"nfs\": \"yyyy-mm-dd\", \"type\": \"text\"}": [
+          "A2:A3"
+        ]
+      },
+      "numeric_ranges": {},
+      "structural_anchors": {
+        "columns": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E"
+        ],
+        "rows": [
+          1,
+          2,
+          3
+        ]
+      }
+    }
+  }
+}

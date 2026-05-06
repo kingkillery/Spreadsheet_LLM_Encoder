@@ -10,6 +10,7 @@ from evaluation_metadata import build_evaluation_metadata, write_evaluation_reco
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
 from chain_of_spreadsheet import identify_table, table_split_qa
 from baselines import BINDER_UNAVAILABLE_REASON, BinderBaseline
+from tokenizer import DEFAULT_MODEL, tokenizer_metadata
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -251,6 +252,7 @@ def main(
             table_count=0,
             qa_item_count=total_questions,
             encoder_settings={"k": k},
+            tokenizer=tokenizer_metadata(DEFAULT_MODEL),
             prompt_serializer="paper_serializers.to_paper_compressed_prompt + stage2_uncompressed_pairs_when_available",
             coordinate_mode="compact_stage1_original_stage2_when_workbook_available",
             model_backend=backend_name,

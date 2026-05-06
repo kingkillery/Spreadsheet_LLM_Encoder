@@ -1,0 +1,1 @@
+(M11|A1)(M12|B1)(IntNum|A2:B3)(IntNum|A4:B4)

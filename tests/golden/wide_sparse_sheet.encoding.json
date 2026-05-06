@@ -1,0 +1,130 @@
+{
+  "file_name": "wide_sparse_sheet.xlsx",
+  "sheet_processing": {
+    "limits": {
+      "max_cells_per_sheet": null,
+      "max_cols_per_sheet": null,
+      "max_rows_per_sheet": null,
+      "sheet_limit_action": "truncate"
+    },
+    "mode": "full",
+    "sheets": {
+      "Sheet1": {
+        "effective_cells": 520,
+        "effective_cols": 26,
+        "effective_rows": 20,
+        "encoded_range": "A1:Z20",
+        "limit_action": "truncate",
+        "original_cells": 520,
+        "original_cols": 26,
+        "original_rows": 20,
+        "status": "encoded",
+        "truncated": false
+      }
+    }
+  },
+  "sheets": {
+    "Sheet1": {
+      "cells": {
+        "11": [
+          "K2"
+        ],
+        "12": [
+          "L2"
+        ],
+        "22": [
+          "K3"
+        ],
+        "24": [
+          "L3"
+        ],
+        "44": [
+          "K5"
+        ],
+        "48": [
+          "L5"
+        ],
+        "M11": [
+          "K1"
+        ],
+        "M12": [
+          "L1"
+        ]
+      },
+      "coord_map": {
+        "cols": {
+          "11": 1,
+          "12": 2,
+          "13": 3,
+          "14": 4
+        },
+        "cols_inv": {
+          "1": 11,
+          "2": 12,
+          "3": 13,
+          "4": 14
+        },
+        "rows": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "5": 4,
+          "6": 5,
+          "7": 6,
+          "19": 7,
+          "20": 8
+        },
+        "rows_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 5,
+          "5": 6,
+          "6": 7,
+          "7": 19,
+          "8": 20
+        }
+      },
+      "encoding_mode": "paper_strict",
+      "formats": {
+        "{\"nfs\": \"General\", \"type\": \"empty\"}": [
+          "M1:N3",
+          "M5:N5",
+          "K6:N7",
+          "K19:N20"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "K2:L3",
+          "K5:L5"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"text\"}": [
+          "K1:L1"
+        ]
+      },
+      "numeric_ranges": {
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "K2:L3",
+          "K5:L5"
+        ]
+      },
+      "structural_anchors": {
+        "columns": [
+          "K",
+          "L",
+          "M",
+          "N"
+        ],
+        "rows": [
+          1,
+          2,
+          3,
+          5,
+          6,
+          7,
+          19,
+          20
+        ]
+      }
+    }
+  }
+}

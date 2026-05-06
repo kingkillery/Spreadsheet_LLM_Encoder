@@ -234,6 +234,12 @@ The encoder reports token counts before and after each stage using `tokenizer.co
 
 ```json
 "compression_metrics": {
+  "tokenizer": {
+    "model": "gpt-4",
+    "backend": "tiktoken",
+    "fallback": false,
+    "fallback_chars_per_token": null
+  },
   "overall": {
     "original_tokens": 1200,
     "after_anchor_tokens": 400,
@@ -258,7 +264,7 @@ The encoder reports token counts before and after each stage using `tokenizer.co
 }
 ```
 
-The baseline (`original_tokens`) uses the paper's vanilla pair-string format (including empty cells in the bounding box), not non-empty JSON cells. Install `tiktoken` for metrics aligned with the paper's reported numbers.
+The baseline (`original_tokens`) uses the paper's vanilla pair-string format (including empty cells in the bounding box), not non-empty JSON cells. Install `tiktoken` for metrics aligned with the paper's reported numbers. The `compression_metrics.tokenizer` block records whether the run used `tiktoken` or the deterministic char/4 fallback; paper-original claims require `fallback=false`.
 
 ## Evaluation
 

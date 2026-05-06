@@ -1,0 +1,1 @@
+A1,Product|B1,Sales|C1,|D1,Region|E1,Cost|A2,A|B2,10|C2,|D2,West|E2,4|A3,B|B3,20|C3,|D3,East|E3,8|A4,|B4,|C4,|D4,|E4,|A5,|B5,|C5,|D5,|E5,|A6,Owner|B6,Open|C6,|D6,|E6,|A7,Mia|B7,3|C7,|D7,|E7,|A8,Leo|B8,1|C8,|D8,|E8,

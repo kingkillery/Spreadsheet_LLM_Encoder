@@ -1,0 +1,32 @@
+{
+  "overall": {
+    "after_anchor_tokens": 53,
+    "after_format_tokens": 37,
+    "after_inverted_index_tokens": 36,
+    "anchor_ratio": 1.0,
+    "final_tokens": 37,
+    "format_ratio": 1.4324324324324325,
+    "inverted_index_ratio": 1.4722222222222223,
+    "original_tokens": 53,
+    "overall_ratio": 1.4324324324324325
+  },
+  "sheets": {
+    "Sheet1": {
+      "after_anchor_tokens": 53,
+      "after_format_tokens": 37,
+      "after_inverted_index_tokens": 36,
+      "anchor_ratio": 1.0,
+      "final_tokens": 37,
+      "format_ratio": 1.4324324324324325,
+      "inverted_index_ratio": 1.4722222222222223,
+      "original_tokens": 53,
+      "overall_ratio": 1.4324324324324325
+    }
+  },
+  "tokenizer": {
+    "backend": "char_approximation",
+    "fallback": true,
+    "fallback_chars_per_token": 4,
+    "model": "gpt-4"
+  }
+}

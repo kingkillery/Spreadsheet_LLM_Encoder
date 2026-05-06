@@ -1,0 +1,150 @@
+{
+  "file_name": "sparse_sheet.xlsx",
+  "sheet_processing": {
+    "limits": {
+      "max_cells_per_sheet": null,
+      "max_cols_per_sheet": null,
+      "max_rows_per_sheet": null,
+      "sheet_limit_action": "truncate"
+    },
+    "mode": "full",
+    "sheets": {
+      "Sheet1": {
+        "effective_cells": 40,
+        "effective_cols": 5,
+        "effective_rows": 8,
+        "encoded_range": "A1:E8",
+        "limit_action": "truncate",
+        "original_cells": 40,
+        "original_cols": 5,
+        "original_rows": 8,
+        "status": "encoded",
+        "truncated": false
+      }
+    }
+  },
+  "sheets": {
+    "Sheet1": {
+      "cells": {
+        "0.82": [
+          "C8"
+        ],
+        "0.91": [
+          "C7"
+        ],
+        "1": [
+          "B7"
+        ],
+        "2": [
+          "B8"
+        ],
+        "Generated note": [
+          "A1"
+        ],
+        "ID": [
+          "B6"
+        ],
+        "Score": [
+          "C6"
+        ],
+        "Sparse marker": [
+          "E2"
+        ],
+        "Status": [
+          "D6"
+        ],
+        "hold": [
+          "D8"
+        ],
+        "ok": [
+          "D7"
+        ]
+      },
+      "coord_map": {
+        "cols": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5
+        },
+        "cols_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5
+        },
+        "rows": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        },
+        "rows_inv": {
+          "1": 1,
+          "2": 2,
+          "3": 3,
+          "4": 4,
+          "5": 5,
+          "6": 6,
+          "7": 7,
+          "8": 8
+        }
+      },
+      "encoding_mode": "paper_strict",
+      "formats": {
+        "{\"nfs\": \"General\", \"type\": \"empty\"}": [
+          "B1:E1",
+          "A2:D2",
+          "A3:E5",
+          "A6:A8",
+          "E6:E8"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"float\"}": [
+          "C7:C8"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "B7:B8"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"text\"}": [
+          "A1",
+          "E2",
+          "B6:D6",
+          "D7:D8"
+        ]
+      },
+      "numeric_ranges": {
+        "{\"nfs\": \"General\", \"type\": \"float\"}": [
+          "C7:C8"
+        ],
+        "{\"nfs\": \"General\", \"type\": \"integer\"}": [
+          "B7:B8"
+        ]
+      },
+      "structural_anchors": {
+        "columns": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E"
+        ],
+        "rows": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      }
+    }
+  }
+}

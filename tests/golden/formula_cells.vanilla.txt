@@ -1,0 +1,5 @@
+# Sheet1
+A1,Item|B1,Units|C1,Price|D1,Total|E1,Aux Total|A2,A|B2,2|C2,5|D2,|E2,|A3,B|B3,3|C3,7|D3,|E3,|A4,Grand Total|B4,|C4,|D4,|E4,
+
+# Aux
+A1,10

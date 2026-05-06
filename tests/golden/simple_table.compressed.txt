@@ -1,0 +1,1 @@
+(Region|A1)(Revenue|B1)(Cost|C1)(West|A2)(IntNum|B2:C3)(East|A3)

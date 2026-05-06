@@ -24,6 +24,7 @@ REQUIRED_METADATA_FIELDS = (
     "table_count",
     "qa_item_count",
     "encoder_settings",
+    "tokenizer",
     "prompt_serializer",
     "coordinate_mode",
     "model_backend",
@@ -47,6 +48,7 @@ def build_evaluation_metadata(
     table_count: int = 0,
     qa_item_count: int = 0,
     encoder_settings: Optional[Dict[str, Any]] = None,
+    tokenizer: Optional[Dict[str, Any]] = None,
     prompt_serializer: str,
     coordinate_mode: str,
     model_backend: str,
@@ -73,6 +75,7 @@ def build_evaluation_metadata(
         "table_count": int(table_count),
         "qa_item_count": int(qa_item_count),
         "encoder_settings": encoder_settings or {},
+        "tokenizer": tokenizer or {},
         "prompt_serializer": prompt_serializer,
         "coordinate_mode": coordinate_mode,
         "model_backend": model_backend,
@@ -132,6 +135,8 @@ def validate_evaluation_metadata(metadata: Dict[str, Any]) -> List[str]:
 
     if not isinstance(metadata.get("encoder_settings"), dict):
         errors.append("evaluation_metadata.encoder_settings must be an object")
+    if not isinstance(metadata.get("tokenizer"), dict):
+        errors.append("evaluation_metadata.tokenizer must be an object")
     if not isinstance(metadata.get("skip_reasons"), list):
         errors.append("evaluation_metadata.skip_reasons must be an array")
 
@@ -167,6 +172,15 @@ def _validate_paper_original_claim(metadata: Dict[str, Any], errors: List[str]) 
         errors.append("paper-original claim requires table_count or qa_item_count > 0")
     if not isinstance(metadata.get("encoder_settings"), dict) or not metadata["encoder_settings"]:
         errors.append("paper-original claim requires non-empty encoder_settings")
+    tokenizer = metadata.get("tokenizer")
+    if not isinstance(tokenizer, dict) or not tokenizer:
+        errors.append("paper-original claim requires tokenizer metadata")
+        return
+    for field in ("model", "backend", "fallback"):
+        if field not in tokenizer:
+            errors.append(f"paper-original claim requires tokenizer.{field}")
+    if tokenizer.get("fallback") is True:
+        errors.append("paper-original claim requires tokenizer fallback to be false")
 
 
 def validate_evaluation_record(record: Dict[str, Any]) -> List[str]:

@@ -25,6 +25,7 @@ class TestEvaluationMetadata(unittest.TestCase):
             table_count=3,
             qa_item_count=0,
             encoder_settings={"k": 4},
+            tokenizer={"model": "gpt-4", "backend": "tiktoken", "fallback": False},
             prompt_serializer="paper_serializers.to_paper_compressed_prompt",
             coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
             model_backend="echo",
@@ -148,6 +149,7 @@ class TestEvaluationMetadata(unittest.TestCase):
             spreadsheet_count=0,
             table_count=0,
             encoder_settings={},
+            tokenizer={"model": "gpt-4", "backend": "char_approximation", "fallback": True},
             prompt_serializer="paper_serializers.to_paper_compressed_prompt",
             coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
             model_backend="unknown",
@@ -173,8 +175,32 @@ class TestEvaluationMetadata(unittest.TestCase):
         )
         self.assertIn("paper-original claim requires spreadsheet_count > 0", errors)
         self.assertIn("paper-original claim requires non-empty encoder_settings", errors)
+        self.assertIn("paper-original claim requires tokenizer fallback to be false", errors)
 
     def test_paper_original_claim_accepts_complete_metadata(self):
+        metadata = build_evaluation_metadata(
+            dataset_dir="datasets/paper_original",
+            task="table_detection",
+            claim_level="paper-original",
+            dataset_name="spreadsheetllm_original_table_detection",
+            dataset_version="paper-release-1",
+            split_name="test",
+            spreadsheet_count=188,
+            table_count=311,
+            encoder_settings={"k": 4},
+            tokenizer={"model": "gpt-4", "backend": "tiktoken", "fallback": False},
+            prompt_serializer="paper_serializers.to_paper_compressed_prompt",
+            coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
+            model_backend="gpt-4-paper-procedure",
+            metric_definition="EoB-0 exact boundary matching; threshold=0.0",
+            baseline_name="SpreadsheetLLM table detection",
+            baseline_version="paper-procedure",
+            baseline_status="run",
+        )
+
+        self.assertEqual(validate_evaluation_metadata(metadata), [])
+
+    def test_paper_original_claim_requires_tokenizer_metadata(self):
         metadata = build_evaluation_metadata(
             dataset_dir="datasets/paper_original",
             task="table_detection",
@@ -194,7 +220,9 @@ class TestEvaluationMetadata(unittest.TestCase):
             baseline_status="run",
         )
 
-        self.assertEqual(validate_evaluation_metadata(metadata), [])
+        errors = validate_evaluation_metadata(metadata)
+
+        self.assertIn("paper-original claim requires tokenizer metadata", errors)
 
 
 if __name__ == "__main__":

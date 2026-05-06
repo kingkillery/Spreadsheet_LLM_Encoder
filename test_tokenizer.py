@@ -29,6 +29,18 @@ class TestTiktokenAvailability(unittest.TestCase):
         result = tok.is_tiktoken_available()
         self.assertIsInstance(result, bool)
 
+    def test_tokenizer_metadata_reports_backend(self):
+        metadata = tok.tokenizer_metadata("gpt-4")
+        self.assertEqual(metadata["model"], "gpt-4")
+        self.assertIn(metadata["backend"], {"tiktoken", "char_approximation"})
+        self.assertIsInstance(metadata["fallback"], bool)
+
+    def test_tokenizer_metadata_can_force_fallback(self):
+        metadata = tok.tokenizer_metadata("gpt-4", force_fallback=True)
+        self.assertEqual(metadata["backend"], "char_approximation")
+        self.assertTrue(metadata["fallback"])
+        self.assertEqual(metadata["fallback_chars_per_token"], 4)
+
 
 class TestTiktokenWhenAvailable(unittest.TestCase):
 

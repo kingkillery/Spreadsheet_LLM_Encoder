@@ -22,7 +22,8 @@ The metadata validator enforces this distinction with an explicit
 fixtures, manifest-driven datasets default to `reconstructed`, and
 `paper-original` is accepted only when the result record carries concrete
 dataset, split, model/backend, prompt serializer, coordinate mode, baseline,
-metric, and encoder metadata.
+metric, encoder, and tokenizer metadata. Paper-original claims are rejected
+when compression metrics used the char/4 tokenizer fallback.
 
 ## Paper Benchmark Shape
 

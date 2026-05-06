@@ -15,6 +15,7 @@ from evaluation import (
 )
 from evaluation_metadata import build_evaluation_metadata, write_evaluation_record
 from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode
+from tokenizer import DEFAULT_MODEL, tokenizer_metadata
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ def main(
             table_count=table_count,
             qa_item_count=0,
             encoder_settings={"k": k},
+            tokenizer=tokenizer_metadata(DEFAULT_MODEL),
             prompt_serializer="paper_serializers.to_paper_compressed_prompt",
             coordinate_mode="compact_prompt_unmapped_to_original_for_eob0",
             model_backend=backend_name,

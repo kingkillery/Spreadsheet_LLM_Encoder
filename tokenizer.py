@@ -8,7 +8,7 @@ tokenizer-based ratios. This module provides a thin wrapper that uses
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,22 @@ def _get_encoder(model: str):
 def is_tiktoken_available() -> bool:
     """Return ``True`` if ``tiktoken`` was importable."""
     return _TIKTOKEN_AVAILABLE
+
+
+def tokenizer_metadata(model: Optional[str] = None, force_fallback: bool = False) -> Dict[str, object]:
+    """Return JSON-serializable metadata for the tokenizer path.
+
+    ``force_fallback`` is primarily for tests and for callers that need to
+    record hypothetical fallback behavior without monkeypatching imports.
+    """
+    model_name = model or DEFAULT_MODEL
+    fallback = force_fallback or not _TIKTOKEN_AVAILABLE
+    return {
+        "model": model_name,
+        "backend": "char_approximation" if fallback else "tiktoken",
+        "fallback": fallback,
+        "fallback_chars_per_token": _FALLBACK_CHARS_PER_TOKEN if fallback else None,
+    }
 
 
 def count_tokens(text: str, model: Optional[str] = None) -> int:

@@ -1,0 +1,1 @@
+A1,Name|B1,Value|C1,Flag|A2,Internal|B2,1|C2,hide|A3,External|B3,2|C3,show

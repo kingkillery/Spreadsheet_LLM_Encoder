@@ -1,0 +1,1 @@
+(Generated note|A1)(Sparse marker|E2)(ID|B6)(Score|C6)(Status|D6)(IntNum|B7:B8)(FloatNum|C7:C8)(ok|D7)(hold|D8)
