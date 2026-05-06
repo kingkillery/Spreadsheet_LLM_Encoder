@@ -277,6 +277,17 @@ def get_cell_style_key(cell):
     return style_tuple
 
 
+def _is_year_like(value):
+    """Return True for common spreadsheet header years."""
+    if isinstance(value, int):
+        return 1900 <= value <= 2100
+    if isinstance(value, float) and value.is_integer():
+        return 1900 <= int(value) <= 2100
+    if isinstance(value, str) and value.strip().isdigit():
+        return 1900 <= int(value.strip()) <= 2100
+    return False
+
+
 def is_header_row(sheet, row_idx):
     """More robust heuristics to detect header rows, as per Appendix C."""
     num_populated = 0
@@ -284,6 +295,9 @@ def is_header_row(sheet, row_idx):
     num_all_caps = 0
     num_strings = 0
     num_centered = 0
+    num_numeric = 0
+    num_year_or_date = 0
+    unique_values = set()
 
     for c in range(1, sheet.max_column + 1):
         cell = sheet.cell(row=row_idx, column=c)
@@ -291,10 +305,17 @@ def is_header_row(sheet, row_idx):
             continue
 
         num_populated += 1
+        unique_values.add(str(cell.value).strip())
         if cell.font and cell.font.bold:
             num_bold += 1
         if cell.alignment and cell.alignment.horizontal == 'center':
             num_centered += 1
+
+        sem_type = detect_semantic_type(cell)
+        if sem_type in {"numeric", "integer", "float", "percentage", "currency"}:
+            num_numeric += 1
+        if sem_type in {"year", "date", "datetime"} or _is_year_like(cell.value):
+            num_year_or_date += 1
 
         if isinstance(cell.value, str):
             num_strings += 1
@@ -312,7 +333,90 @@ def is_header_row(sheet, row_idx):
     if num_strings > 0 and num_all_caps / num_strings > 0.6:
         return True
 
+    # Plain text headers in benchmark spreadsheets are often not styled.
+    # Require at least two populated cells so single-cell titles/notes do not
+    # become table headers just because they contain text.
+    if (
+        num_populated >= 2
+        and num_strings / num_populated >= 0.5
+        and num_numeric / num_populated <= 0.5
+        and len(unique_values) > 1
+    ):
+        return True
+
+    # Year/date rows are common spreadsheet headers even when values are typed
+    # as numbers or dates rather than strings.
+    if num_populated >= 2 and num_year_or_date / num_populated >= 0.5:
+        return True
+
     return False
+
+
+def _cell_profile(cell, merged_coordinates):
+    """Compact profile for structural boundary comparisons."""
+    value = cell.value
+    populated = value is not None and str(value).strip() != ""
+    text_shape = None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isupper() and len(stripped) > 1:
+            text_shape = "upper"
+        elif stripped.istitle():
+            text_shape = "title"
+        elif stripped:
+            text_shape = "text"
+    return (
+        populated,
+        detect_semantic_type(cell) if populated else "empty",
+        text_shape,
+        cell.coordinate in merged_coordinates,
+        get_cell_style_key(cell),
+    )
+
+
+def _range_stats(sheet, r1, c1, r2, c2):
+    """Return density and text/number proportions for a candidate range."""
+    total = (r2 - r1 + 1) * (c2 - c1 + 1)
+    populated = text = numeric = year_or_date = 0
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            cell = sheet.cell(row=r, column=c)
+            if cell.value is None or str(cell.value).strip() == "":
+                continue
+            populated += 1
+            sem_type = detect_semantic_type(cell)
+            if sem_type in {"numeric", "integer", "float", "percentage", "currency"}:
+                numeric += 1
+            if sem_type in {"year", "date", "datetime"} or _is_year_like(cell.value):
+                year_or_date += 1
+            if isinstance(cell.value, str):
+                text += 1
+    return {
+        "density": populated / total if total else 0,
+        "populated": populated,
+        "text_ratio": text / populated if populated else 0,
+        "numeric_ratio": numeric / populated if populated else 0,
+        "year_or_date_ratio": year_or_date / populated if populated else 0,
+    }
+
+
+def _edge_density(sheet, r1, c1, r2, c2):
+    edge_cells = []
+    for c in range(c1, c2 + 1):
+        edge_cells.append(sheet.cell(row=r1, column=c))
+        if r2 != r1:
+            edge_cells.append(sheet.cell(row=r2, column=c))
+    for r in range(r1 + 1, r2):
+        edge_cells.append(sheet.cell(row=r, column=c1))
+        if c2 != c1:
+            edge_cells.append(sheet.cell(row=r, column=c2))
+    if not edge_cells:
+        return 0
+    populated = sum(
+        1 for cell in edge_cells
+        if cell.value is not None and str(cell.value).strip() != ""
+    )
+    return populated / len(edge_cells)
 
 
 def find_boundary_candidates(sheet):
@@ -320,14 +424,16 @@ def find_boundary_candidates(sheet):
     Identify row/column boundary candidates using enhanced heterogeneity heuristics
     from Appendix C, including cell value, merged status, and style.
     """
+    merged_coordinates = {
+        coord for merged_range in sheet.merged_cells.ranges for coord in merged_range
+    }
+
     row_profiles = []
     for r in range(1, sheet.max_row + 1):
         profile = []
         for c in range(1, sheet.max_column + 1):
             cell = sheet.cell(row=r, column=c)
-            is_merged = any(cell.coordinate in r_ for r_ in sheet.merged_cells.ranges)
-            style_key = get_cell_style_key(cell)
-            profile.append((cell.value, is_merged, style_key))
+            profile.append(_cell_profile(cell, merged_coordinates))
         row_profiles.append(profile)
 
     col_profiles = []
@@ -335,9 +441,7 @@ def find_boundary_candidates(sheet):
         profile = []
         for r in range(1, sheet.max_row + 1):
             cell = sheet.cell(row=r, column=c)
-            is_merged = any(cell.coordinate in r_ for r_ in sheet.merged_cells.ranges)
-            style_key = get_cell_style_key(cell)
-            profile.append((cell.value, is_merged, style_key))
+            profile.append(_cell_profile(cell, merged_coordinates))
         col_profiles.append(profile)
 
     row_candidates = set()
@@ -387,22 +491,27 @@ def filter_unreasonable_candidates(sheet, candidates):
     filtered = []
     for r1, c1, r2, c2 in candidates:
         # Size filter
-        if (r2 - r1 < 1) or (c2 - c1 < 1): continue # Must have at least 2 rows/cols
+        if (r2 - r1 < 1) or (c2 - c1 < 1):
+            continue  # Must have at least 2 rows/cols
 
-        # Sparsity filter
-        num_cells = (r2 - r1 + 1) * (c2 - c1 + 1)
-        populated_cells = 0
-        for r in range(r1, r2 + 1):
-            for c in range(c1, c2 + 1):
-                if sheet.cell(row=r, column=c).value is not None:
-                    populated_cells += 1
+        stats = _range_stats(sheet, r1, c1, r2, c2)
 
-        if populated_cells / num_cells < 0.1: # At least 10% populated
+        # Internal sparsity filter.
+        if stats["density"] < 0.1:
             continue
 
-        # Header presence filter (simple version)
+        # Edge sparsity filter. Real table boundaries generally have visible
+        # content near at least one edge; this rejects huge sparse rectangles
+        # formed by distant notes or isolated cells.
+        if _edge_density(sheet, r1, c1, r2, c2) < 0.08:
+            continue
+
+        # Header and proportion filters. Keep text-header tables, date/year
+        # header tables, and numeric-heavy tables only when a header row exists.
         has_header = any(is_header_row(sheet, r) for r in range(r1, r2 + 1))
         if not has_header:
+            continue
+        if stats["text_ratio"] == 0 and stats["year_or_date_ratio"] == 0:
             continue
 
         filtered.append((r1, c1, r2, c2))
@@ -440,9 +549,12 @@ def filter_overlapping_candidates(sheet, candidates):
     for r1, c1, r2, c2 in candidates:
         score = 0
         # Header score
-        for r in range(r1, min(r1 + 3, r2 + 1)): # Check top 3 rows for header
+        for r in range(r1, min(r1 + 3, r2 + 1)):  # Check top 3 rows for header
             if is_header_row(sheet, r):
                 score += 10
+        stats = _range_stats(sheet, r1, c1, r2, c2)
+        score += stats["density"] * 5
+        score += stats["year_or_date_ratio"] * 3
         # Area score
         score += (r2 - r1 + 1) * (c2 - c1 + 1)
         scores.append(score)

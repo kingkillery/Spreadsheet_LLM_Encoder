@@ -192,8 +192,8 @@ class TestChainOfSpreadsheet(unittest.TestCase):
             os.remove(tmp_xlsx)
             os.rmdir(tmp_dir)
 
-        self.assertGreaterEqual(len(backend.calls), 2)
-        self.assertIn("Candidate Answers", backend.calls[-1])
+        self.assertEqual(len(backend.calls), 1)
+        self.assertNotIn("Candidate Answers", backend.calls[-1])
         self.assertEqual(result, "ans")
         self.assertTrue(
             any("token_limit" in line for line in cm.output),
@@ -208,6 +208,21 @@ class TestChainOfSpreadsheet(unittest.TestCase):
         """_call_llm must raise NotImplementedError until a backend is configured."""
         with self.assertRaises(NotImplementedError):
             cos._call_llm("any prompt")
+
+    def test_synthesize_chunk_answers_shortcuts_zero_or_one_candidate(self):
+        backend = EchoBackend(response="final")
+        cos.configure_backend(backend)
+        try:
+            self.assertEqual(cos._synthesize_chunk_answers("Q", []), "[]")
+            self.assertEqual(cos._synthesize_chunk_answers("Q", ["[A1]"]), "[A1]")
+            self.assertEqual(backend.calls, [])
+
+            self.assertEqual(cos._synthesize_chunk_answers("Q", ["[A1]", "[B2]"]), "final")
+        finally:
+            cos.configure_backend(None)
+
+        self.assertEqual(len(backend.calls), 1)
+        self.assertIn("Candidate Answers", backend.calls[0])
 
     def test_range_regex_accepts_double_quotes(self):
         """LLMs sometimes emit double-quoted ranges; the parser must accept both."""

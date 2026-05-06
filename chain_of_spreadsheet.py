@@ -413,9 +413,17 @@ def _render_chunk_prompt(
 
 
 def _synthesize_chunk_answers(query: str, answers: Sequence[str]) -> str:
-    """Run the final CoS synthesis step over per-chunk candidate answers."""
+    """Run the final CoS synthesis step over per-chunk candidate answers.
+
+    Skips the synthesis LLM call when there is at most one candidate: zero
+    answers degenerate to ``"[]"`` and a single answer is already final, so
+    funneling it back through the LLM only risks a reformat or hallucinated
+    rewrite while paying for an extra round trip.
+    """
     if not answers:
         return "[]"
+    if len(answers) == 1:
+        return answers[0]
     answer_block = "\n".join(f"{idx + 1}. {answer}" for idx, answer in enumerate(answers))
     prompt = QA_FINAL_SYNTHESIS_PROMPT_TEMPLATE.replace("[Question]", query)
     prompt = prompt.replace("[Candidate Answers]", answer_block)

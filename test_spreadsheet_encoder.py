@@ -3,7 +3,14 @@ import os
 import json
 import openpyxl
 from openpyxl.styles import Font, PatternFill
-from Spreadsheet_LLM_Encoder import spreadsheet_llm_encode, find_boundary_candidates, aggregate_regions_dfs, vanilla_encode
+from Spreadsheet_LLM_Encoder import (
+    spreadsheet_llm_encode,
+    find_boundary_candidates,
+    aggregate_regions_dfs,
+    vanilla_encode,
+    is_header_row,
+    filter_unreasonable_candidates,
+)
 
 class TestSpreadsheetEncoder(unittest.TestCase):
 
@@ -56,6 +63,58 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         # We expect a boundary between the two groups of cells.
         self.assertIn(4, rows) # Boundary between row 3 and 4
         self.assertIn(3, cols) # Boundary between col B and C
+
+    def test_plain_text_header_detected_without_style(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Region", "Revenue", "Cost"])
+        ws.append(["West", 100, 50])
+        ws.append(["East", 200, 90])
+
+        self.assertTrue(is_header_row(ws, 1))
+        self.assertFalse(is_header_row(ws, 2))
+
+    def test_year_header_detected(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append([2022, 2023, 2024])
+        ws.append([10, 20, 30])
+
+        self.assertTrue(is_header_row(ws, 1))
+
+    def test_sparse_note_candidate_filtered(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "Revenue Report"
+        ws["A1"].font = Font(bold=True)
+        ws["A20"] = "Note"
+        ws["D20"] = "Draft"
+
+        filtered = filter_unreasonable_candidates(ws, [(1, 1, 20, 4)])
+
+        self.assertEqual(filtered, [])
+
+    def test_strict_skeleton_retains_homogeneous_rows(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws["A1"] = "ID"
+        ws["B1"] = "Value"
+        for r in [2, 3]:
+            ws.cell(row=r, column=1, value=0)
+            ws.cell(row=r, column=2, value=0)
+        ws["A4"] = "End"
+        ws["B4"] = 5
+        path = "strict_skeleton.xlsx"
+        wb.save(path)
+
+        try:
+            result = spreadsheet_llm_encode(path, k=1, compress_homogeneous=False)
+        finally:
+            os.remove(path)
+
+        cells = result["sheets"]["Sheet"]["cells"]
+        refs = [ref for ranges in cells.values() for ref in ranges]
+        self.assertTrue(any(ref.endswith("2") or ref.endswith("3") for ref in refs))
 
     def test_aggregate_regions_dfs(self):
         wb = openpyxl.load_workbook(self.test_file)
