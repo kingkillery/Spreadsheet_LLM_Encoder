@@ -262,7 +262,7 @@ def main(
         record = {
             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "task": "spreadsheet_qa",
-            "dataset_dir": os.path.abspath(dataset_dir),
+            "dataset_dir": os.path.abspath(dataset_dir) if dataset_dir else None,
             "manifest_path": os.path.abspath(manifest_path) if manifest_path else None,
             "k": k,
             "backend": backend_name,
@@ -284,7 +284,12 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Spreadsheet QA evaluation.")
-    parser.add_argument("dataset_dir", help="Path to the QA dataset directory")
+    parser.add_argument(
+        "dataset_dir",
+        nargs="?",
+        default=None,
+        help="Path to the QA dataset directory. Optional when --manifest is provided.",
+    )
     parser.add_argument(
         "--k", type=int, default=4,
         help="Neighborhood distance for structural anchors (default: 4)"
@@ -324,6 +329,9 @@ if __name__ == "__main__":
         help="HF model id for --real-tapex (default: microsoft/tapex-base-finetuned-wtq).",
     )
     args = parser.parse_args()
+
+    if not args.dataset_dir and not args.manifest:
+        parser.error("either dataset_dir or --manifest is required")
 
     from llm_backend import EchoBackend, OpenAIBackend
 

@@ -60,7 +60,7 @@ def predict_tables_with_llm(encoding: Dict, llm_callable) -> List[BBox]:
 
 
 def main(
-    dataset_dir: str,
+    dataset_dir: Optional[str],
     k: int,
     llm_callable,
     out_record: Optional[str] = None,
@@ -74,6 +74,9 @@ def main(
     timestamp, dataset, k, backend, per-item F1, and average F1 — feeds the
     spreadsheet-llm-fidelity skill_runs log without log-string parsing.
     """
+    if not dataset_dir and not manifest_path:
+        raise ValueError("dataset_dir is required unless manifest_path is provided")
+
     data = (
         load_table_detection_manifest(manifest_path)
         if manifest_path
@@ -142,7 +145,7 @@ def main(
         record = {
             "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "task": "table_detection_eob0",
-            "dataset_dir": os.path.abspath(dataset_dir),
+            "dataset_dir": os.path.abspath(dataset_dir) if dataset_dir else None,
             "manifest_path": os.path.abspath(manifest_path) if manifest_path else None,
             "k": k,
             "backend": backend_name,
@@ -158,7 +161,12 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run LLM-based table detection evaluation.")
-    parser.add_argument("dataset_dir", help="Path to the spreadsheet dataset directory")
+    parser.add_argument(
+        "dataset_dir",
+        nargs="?",
+        default=None,
+        help="Path to the spreadsheet dataset directory. Optional when --manifest is provided.",
+    )
     parser.add_argument(
         "--k", type=int, default=4,
         help="Neighborhood distance for structural anchors (default: 4)"
@@ -186,6 +194,8 @@ if __name__ == "__main__":
         help="Optional table-detection manifest JSON. When set, it overrides dataset_dir scanning.",
     )
     args = parser.parse_args()
+    if not args.dataset_dir and not args.manifest:
+        parser.error("dataset_dir is required unless --manifest is provided")
 
     from llm_backend import EchoBackend, OpenAIBackend
 
