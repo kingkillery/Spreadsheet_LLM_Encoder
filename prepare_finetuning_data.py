@@ -54,7 +54,9 @@ def format_for_finetuning(encoding: Dict, gt_boxes: List[BBox]) -> List[Dict]:
         prompt = TABLE_DETECTION_PROMPT_TEMPLATE.replace("[Encoded Spreadsheet]", prompt_input)
 
         gt_ranges = []
+        original_ranges = []
         for bbox in gt_boxes:
+            original_range = bbox_to_range(bbox)
             prompt_range = bbox_to_prompt_range(bbox, coord_map)
             if prompt_range is None:
                 logger.warning(
@@ -64,11 +66,21 @@ def format_for_finetuning(encoding: Dict, gt_boxes: List[BBox]) -> List[Dict]:
                     sheet_name,
                 )
                 continue
+            original_ranges.append(original_range)
             gt_ranges.append(prompt_range)
         range_parts = ["'range': '" + r + "'" for r in gt_ranges]
         completion = "[" + ", ".join(range_parts) + "]"
 
-        records.append({"prompt": prompt, "completion": completion})
+        records.append({
+            "prompt": prompt,
+            "completion": completion,
+            "metadata": {
+                "sheet_name": sheet_name,
+                "coordinate_mode": "compact_prompt_ranges" if coord_map else "original_ranges",
+                "prompt_ranges": gt_ranges,
+                "original_ranges": original_ranges,
+            },
+        })
 
     return records
 

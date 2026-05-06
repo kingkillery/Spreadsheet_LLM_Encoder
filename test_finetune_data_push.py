@@ -90,6 +90,9 @@ class TestFormatForFinetuningCoordinates(unittest.TestCase):
         self.assertIn("(IntNum|A1:B2)", records[0]["prompt"])
         self.assertIn("'range': 'A1:B2'", records[0]["completion"])
         self.assertNotIn("'range': 'C2:D3'", records[0]["completion"])
+        self.assertEqual(records[0]["metadata"]["coordinate_mode"], "compact_prompt_ranges")
+        self.assertEqual(records[0]["metadata"]["prompt_ranges"], ["A1:B2"])
+        self.assertEqual(records[0]["metadata"]["original_ranges"], ["C2:D3"])
 
     def test_unmapped_ground_truth_box_is_skipped(self):
         mod = _load_module()
@@ -113,6 +116,8 @@ class TestFormatForFinetuningCoordinates(unittest.TestCase):
             records = mod.format_for_finetuning(encoding, [(2, 3, 3, 4)])
 
         self.assertEqual(records[0]["completion"], "[]")
+        self.assertEqual(records[0]["metadata"]["prompt_ranges"], [])
+        self.assertEqual(records[0]["metadata"]["original_ranges"], [])
 
 
 class TestFinetuneManifest(unittest.TestCase):
