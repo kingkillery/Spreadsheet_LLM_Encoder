@@ -1,0 +1,45 @@
+{
+  "iteration": 2,
+  "timestamp": "2026-05-06T01:00:00Z",
+  "goal": "Provide a runnable substitute for the paper's private datasets and a fine-tuning recipe via HuggingFace ml-intern.",
+  "verified": [
+    "Microsoft did not publish the paper's 188-spreadsheet table-detection benchmark or 64-spreadsheet QA set.",
+    "evaluation.py:load_spreadsheet_dataset and load_qa_dataset already define an ingestible JSON+xlsx schema.",
+    "ml-intern (huggingface/ml-intern) accepts headless prompts and runs HF training jobs."
+  ],
+  "inferred": [
+    "Synthetic data with 4 layouts × 3 sizes × 6 content types covers enough variety to smoke-test the eval pipeline; not enough to reproduce paper F1.",
+    "Rule-based QA (lookup, aggregation, comparison, header) maps cleanly onto the paper's [CELL_REF] / [SUM(...)] answer contract."
+  ],
+  "unknown": [
+    "Whether ml-intern's HF Jobs runner can fine-tune Llama-3-8B with QLoRA on a free-tier GPU; user must verify with their own credentials."
+  ],
+  "amendment": {
+    "files_changed": [
+      "scripts/__init__.py (new)",
+      "scripts/synthesize_benchmark.py (new)",
+      "scripts/synthesize_qa.py (new)",
+      "scripts/finetune_local.py (new — HF Transformers + PEFT LoRA)",
+      "prepare_finetuning_data.py (--push-to-hub / --hub-private / --hub-split flags)",
+      "FINETUNE.md (new — ml-intern + local recipes)",
+      "datasets/README.md (new — schema, synthesis, real-dataset plug-in)",
+      "requirements.txt (datasets/transformers/peft/accelerate/bitsandbytes optional)"
+    ],
+    "tests_added": [
+      "test_synthesize.py (4 tests)",
+      "test_finetune_data_push.py (3 tests)"
+    ],
+    "lines_delta": "approx +1100/-10"
+  },
+  "evaluation": {
+    "tests_total": 111,
+    "tests_passed": 111,
+    "validators": {
+      "architect": "deferred — out-of-paper-scope helper scripts, no fidelity risk",
+      "security": "deferred — push-to-hub uses HF SDK; no new credential paths",
+      "code_review": "deferred — synthetic data scripts are isolated"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Wire a real LLM backend smoke-test through synthesize → encode → run_llm_evaluation so end-to-end is exercised, not just unit-mocked."
+}

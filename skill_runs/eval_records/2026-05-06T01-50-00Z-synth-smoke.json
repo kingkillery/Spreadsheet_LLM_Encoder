@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-05-06T07:29:12.478016+00:00",
+  "task": "table_detection_eob0",
+  "dataset_dir": "C:\\Users\\prest\\AppData\\Local\\Temp\\sllm_demo",
+  "k": 4,
+  "backend": "echo",
+  "n_items": 4,
+  "avg_f1_eob0": 0.0,
+  "per_item": [
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_demo\\synth_0000.xlsx",
+      "gt_count": 1,
+      "pred_count": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_demo\\synth_0001.xlsx",
+      "gt_count": 1,
+      "pred_count": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_demo\\synth_0002.xlsx",
+      "gt_count": 1,
+      "pred_count": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_demo\\synth_0003.xlsx",
+      "gt_count": 1,
+      "pred_count": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  ],
+  "meta": {}
+}

@@ -1,0 +1,49 @@
+{
+  "iteration": 1,
+  "timestamp": "2026-05-06T00:30:00Z",
+  "goal": "Implement paper-faithful prompt serializers, coordinate remapping, and format-region substitution; default k=4; tokenizer-based metrics; LLM backend abstraction; real CoS Stage 2 + Algorithm 2 row chunking.",
+  "verified": [
+    "Paper Section 3.1 specifies vanilla as A1,value|A2,value row-major with empty cells included.",
+    "Paper Section 3.3 specifies compressed prompt as (content|address) tuples with semantic labels (IntNum, FloatNum, DateData, EmailData, ScientificNum, PercentageNum, CurrencyNum, TimeData, YearData) substituted for compressible regions.",
+    "Paper ablation: k=4 is best overall; repo defaulted to k=2.",
+    "Paper Section 4.2: Stage 2 is uncompressed, but the previous CoS passed compressed encoding."
+  ],
+  "inferred": [
+    "Paper does not specify the inter-tuple separator unambiguously; we used empty separator (paper-style concatenation), configurable.",
+    "Paper's 'data_only' choice for cached values vs formula text was not stated; we picked data_only=True for paper alignment."
+  ],
+  "unknown": [
+    "Exact tokenizer the paper used for compression-ratio numbers (we use tiktoken's gpt-4 encoder by default).",
+    "Paper's exact dataset splits are not public."
+  ],
+  "amendment": {
+    "files_changed": [
+      "paper_serializers.py (new)",
+      "tokenizer.py (new)",
+      "llm_backend.py (new)",
+      "Spreadsheet_LLM_Encoder.py (k=4, coord_map, tokenizer metrics, dead code removed, multi-sheet vanilla)",
+      "chain_of_spreadsheet.py (full refactor: backend abstraction, real Stage 2, Algorithm 2)",
+      "run_llm_evaluation.py / run_qa_evaluation.py / prepare_finetuning_data.py (paper serializers, k=4, --backend flags)",
+      "example_chain_usage.py / README.md / requirements.txt / streamlit_app.py"
+    ],
+    "tests_added": [
+      "test_paper_serializers.py (43 tests)",
+      "test_tokenizer.py (8 tests)",
+      "test_llm_backend.py (18 tests)",
+      "test_coord_map_integration.py (12 tests)",
+      "test_chain_of_spreadsheet.py (rewritten, 8 tests including over-budget guard and double-quote regex)"
+    ],
+    "lines_delta": "approx +2400/-300"
+  },
+  "evaluation": {
+    "tests_total": 102,
+    "tests_passed": 102,
+    "validators": {
+      "architect": "approved-after-fixing-find_structural_anchors-default-k",
+      "security": "approved-after-MAX_CELLS_PER_RANGE-and-double-quote-regex",
+      "code_review": "approved-after-deleting-dead-code-and-adding-over-budget-guard"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Synthetic dataset substitute + fine-tuning recipe"
+}

@@ -1,0 +1,117 @@
+{
+  "timestamp": "2026-05-06T07:37:03.858351+00:00",
+  "task": "spreadsheet_qa",
+  "dataset_dir": "C:\\Users\\prest\\AppData\\Local\\Temp\\sllm_qa_demo",
+  "k": 4,
+  "backend": "echo",
+  "n_questions": 6,
+  "spreadsheetllm_accuracy_pct": 0.0,
+  "tapex_placeholder_accuracy_pct": 0.0,
+  "binder_placeholder_accuracy_pct": 0.0,
+  "baselines_are_placeholders": true,
+  "per_question": [
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0000.xlsx",
+      "question": "What is the value in the 'Score' column for 'carol74@data.io'?",
+      "ground_truth": "[C9]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0000.xlsx",
+      "question": "What is the column name for column C?",
+      "ground_truth": "[C1]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0001.xlsx",
+      "question": "What is the value in the 'Type' column for 'R5'?",
+      "ground_truth": "[B6]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0001.xlsx",
+      "question": "What is the column name for column F?",
+      "ground_truth": "[F1]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0002.xlsx",
+      "question": "What is the value in the 'F' column for '2'?",
+      "ground_truth": "[F2]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    },
+    {
+      "spreadsheet_path": "C:/Users/prest/AppData/Local/Temp/sllm_qa_demo\\synth_0002.xlsx",
+      "question": "What is the MAX of the 'G' column from row 2 to row 51?",
+      "ground_truth": "[MAX(G2:G51)]",
+      "spreadsheetllm": {
+        "predicted": "['range': 'A1:D5']",
+        "correct": false
+      },
+      "tapex_placeholder": {
+        "predicted": "[C5]",
+        "correct": false
+      },
+      "binder_placeholder": {
+        "predicted": "[SUM(D1:D5)]",
+        "correct": false
+      }
+    }
+  ],
+  "meta": {}
+}

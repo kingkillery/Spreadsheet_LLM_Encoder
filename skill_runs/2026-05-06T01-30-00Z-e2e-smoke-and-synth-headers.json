@@ -1,0 +1,40 @@
+{
+  "iteration": 3,
+  "timestamp": "2026-05-06T01:30:00Z",
+  "goal": "Wire end-to-end smoke test through synth -> encode -> run_llm_evaluation; fix any contract mismatch the test surfaces.",
+  "verified": [
+    "No prior test imported scripts.synthesize_benchmark together with Spreadsheet_LLM_Encoder; the wiring was unverified.",
+    "First synthetic workbook produced an empty encoder skeleton: 0 rows kept, 0 cols kept, 0 cells. (Verified by debug print in iteration log.)",
+    "Root cause: synthesize_benchmark headers carried no Font(bold=True), so is_header_row returned False and filter_unreasonable_candidates rejected every boundary candidate.",
+    "Fix scope: 4 header-cell sites in scripts/synthesize_benchmark.py (_write_simple_grid, _write_row_headers col + row labels, _write_merged_title)."
+  ],
+  "inferred": [
+    "Real spreadsheets generally style headers (bold/centered/all-caps); the encoder's heuristic is paper-aligned, not too strict. The synth was the outlier.",
+    "Other layouts (blank_row_separator delegates to simple_grid) are now also fixed by the simple_grid change."
+  ],
+  "unknown": [
+    "Whether _write_merged_title's title rows + header detection still triggers `filter_unreasonable_candidates`'s `has_header` check correctly when the merged title spans rows 1-2; only verified that the synth pipeline as a whole produces a non-empty prompt now."
+  ],
+  "amendment": {
+    "files_changed": [
+      "scripts/synthesize_benchmark.py (apply Font(bold=True) to all header cells)",
+      "test_end_to_end.py (new — 2 tests covering synth->encode->eval and synth_qa loader round-trip)"
+    ],
+    "tests_added": [
+      "test_end_to_end.py::TestEndToEnd::test_synth_then_encode_then_eval_smoke",
+      "test_end_to_end.py::TestEndToEnd::test_synth_qa_round_trips_through_qa_dataset_loader"
+    ],
+    "lines_delta": "+150/-7"
+  },
+  "evaluation": {
+    "tests_total": 111,
+    "tests_passed": 111,
+    "validators": {
+      "architect": "self-falsified — falsified the alternative 'encoder too strict' hypothesis before patching",
+      "security": "n/a — synthetic-data fix, no new attack surface",
+      "code_review": "n/a — single-line styling additions"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Capture eval metrics into skill_runs/ from run_llm_evaluation.py automatically (right now the script logs to stderr but doesn't persist a structured record). Lets us compare iteration-over-iteration F1 / compression ratios."
+}

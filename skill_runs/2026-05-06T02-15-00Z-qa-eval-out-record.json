@@ -1,0 +1,43 @@
+{
+  "iteration": 5,
+  "timestamp": "2026-05-06T02:15:00Z",
+  "goal": "Symmetric --out-record for run_qa_evaluation.py + fix the latent NotImplementedError when --backend=echo (echo path was never wiring chain_of_spreadsheet.configure_backend).",
+  "verified": [
+    "Pre-iteration: run_qa_evaluation.py --backend echo would call identify_table -> _call_llm -> NotImplementedError because configure_backend was only invoked under the openai branch.",
+    "Pre-iteration: run_qa_evaluation.py had no --out-record, asymmetric vs run_llm_evaluation (iteration 4).",
+    "After iteration: synth -> qa-synth -> run_qa_evaluation --backend echo --out-record completes cleanly. Record written at skill_runs/eval_records/2026-05-06T02-15-00Z-qa-synth-smoke.json with 6 questions across 3 workbooks. Accuracies all 0% (expected: Echo backend always returns the same canned range).",
+    "Schema includes baselines_are_placeholders: true so downstream readers won't mistake placeholder accuracy for real TaPEx/Binder numbers."
+  ],
+  "inferred": [
+    "Bundling the echo-backend bug fix with the --out-record addition was acceptable scope creep — the test for --out-record cannot pass without the fix, so they're coupled.",
+    "The per_question structure mirrors run_llm_evaluation's per_item — useful for future error-cluster analysis once a real backend produces meaningful predictions."
+  ],
+  "unknown": [
+    "Whether the spreadsheetllm.predicted field should also capture intermediate state (identified table_range, sheet picked) for richer post-hoc analysis. Holding off until a real backend produces non-trivial outputs."
+  ],
+  "amendment": {
+    "files_changed": [
+      "run_qa_evaluation.py (--out-record, --echo-response, configure_backend on every backend, structured per-question record, accuracy capture)",
+      "test_end_to_end.py (added test_qa_eval_writes_out_record)"
+    ],
+    "tests_added": [
+      "test_end_to_end.py::TestEndToEnd::test_qa_eval_writes_out_record"
+    ],
+    "lines_delta": "+140/-30"
+  },
+  "evaluation": {
+    "tests_total": 113,
+    "tests_passed": 113,
+    "validators": {
+      "architect": "self — schema mirrors iteration 4's run_llm_evaluation record; baselines_are_placeholders flag prevents misreading",
+      "security": "self — no new attack surface; same operator-supplied path semantics as iteration 4",
+      "code_review": "self — bundled fix justified (test wouldn't pass otherwise); echo path now wired symmetrically with openai path"
+    },
+    "first_real_record": "skill_runs/eval_records/2026-05-06T02-15-00Z-qa-synth-smoke.json",
+    "verified_observations": [
+      "Echo backend produces 0% accuracy across all three systems on synthetic QA — exactly what we'd expect from a constant-response backend, confirming the metric pipeline isn't accidentally inflating numbers."
+    ]
+  },
+  "verdict": "promote",
+  "next_gap": "Real TaPEx baseline (microsoft/tapex-base-finetuned-wtq via HuggingFace pipeline) so the placeholder TaPEx column gets replaced by numbers worth comparing. Will need a TaPExBackend adapter (~50 lines) and a sanity test that doesn't hit the network — likely a mocked HF pipeline."
+}

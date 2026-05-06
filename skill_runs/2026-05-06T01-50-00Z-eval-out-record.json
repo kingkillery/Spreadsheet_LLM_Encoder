@@ -1,0 +1,38 @@
+{
+  "iteration": 4,
+  "timestamp": "2026-05-06T01:50:00Z",
+  "goal": "Persist eval metrics in a structured JSON record so iteration-over-iteration F1 / compression deltas are trackable without log-string parsing.",
+  "verified": [
+    "Pre-iteration: run_llm_evaluation.py wrote results only to stderr (logger.info).",
+    "After iteration: --out-record path produces a JSON with timestamp, dataset_dir, k, backend, n_items, avg_f1_eob0, per_item, meta.",
+    "End-to-end check: ran scripts/synthesize_benchmark.py on /tmp/sllm_demo (n=4, seed=7) -> ran run_llm_evaluation.py with EchoBackend -> wrote skill_runs/eval_records/2026-05-06T01-50-00Z-synth-smoke.json. F1=0.0 with the Echo backend (expected: it returns one canned range that misses most ground truth)."
+  ],
+  "inferred": [
+    "Adding --out-record to run_qa_evaluation.py would extend the same pattern; deferred (no QA dataset to evaluate on yet)."
+  ],
+  "unknown": [
+    "Whether the per_item record needs a 'predicted_ranges' field for future error-cluster analysis. Holding off until a real (non-Echo) backend run produces meaningful predictions."
+  ],
+  "amendment": {
+    "files_changed": [
+      "run_llm_evaluation.py (added --out-record flag, structured JSON writer, datetime/json imports)",
+      "test_end_to_end.py (added test_eval_writes_out_record)"
+    ],
+    "tests_added": [
+      "test_end_to_end.py::TestEndToEnd::test_eval_writes_out_record"
+    ],
+    "lines_delta": "+90/-10"
+  },
+  "evaluation": {
+    "tests_total": 112,
+    "tests_passed": 112,
+    "validators": {
+      "architect": "self — output-record schema mirrors skill_runs SKILL.md contract",
+      "security": "self — no new attack surface (writes a JSON file under operator-supplied path; same access control as the rest of the script)",
+      "code_review": "self — single new flag + helper, no API changes to existing call sites"
+    },
+    "first_real_record": "skill_runs/eval_records/2026-05-06T01-50-00Z-synth-smoke.json"
+  },
+  "verdict": "promote",
+  "next_gap": "Add --out-record symmetrically to run_qa_evaluation.py once a non-Echo backend is wired up so we have meaningful QA accuracy to track."
+}
