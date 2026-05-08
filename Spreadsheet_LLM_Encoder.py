@@ -21,6 +21,24 @@ from tokenizer import count_tokens, DEFAULT_MODEL, tokenizer_metadata
 logger = logging.getLogger(__name__)
 
 EXCEL_ERROR_VALUES = {"#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"}
+SPARSE_TEXT_MAX_RATIO = 0.5
+MAX_TRAILING_NOTE_ROWS = 2
+MAX_SPARSE_COLUMN_RATIO = 0.5
+MAX_DETAILED_ANCHOR_DIMENSION = 10
+HEADER_AT_TOP_BONUS = 30
+HEADER_AFTER_TITLE_BONUS = 24
+MAX_BODY_ROW_BONUS = 10
+MAX_WIDTH_BONUS = 8
+BODY_DENSITY_WEIGHT = 25
+RANGE_DENSITY_WEIGHT = 8
+YEAR_OR_DATE_WEIGHT = 4
+MAX_POPULATED_CELL_BONUS = 12
+BODY_ROW_BONUS = 2
+TITLE_ROW_BONUS = 2
+NOTE_ROW_BONUS = 1
+EXTRA_ROW_PENALTY = 2
+OVERLAP_IOU_SUPPRESSION_THRESHOLD = 0.5
+OVERLAP_CONTAINMENT_SUPPRESSION_THRESHOLD = 0.85
 _FORMULA_REF_RE = re.compile(
     r"(?<![A-Za-z0-9_])"
     r"(?:(?:'(?P<quoted_sheet>[^']+)'|(?P<sheet>[A-Za-z_][A-Za-z0-9_ .]*))!)?"
@@ -755,20 +773,20 @@ def _edge_density(sheet, r1, c1, r2, c2):
     return populated / len(edge_cells)
 
 
-def _is_populated_cell(cell):
+def is_populated_cell(cell):
     return cell.value is not None and str(cell.value).strip() != ""
 
 
 def _populated_count_in_row(sheet, row_idx, c1=None, c2=None):
     start = c1 if c1 is not None else 1
     end = c2 if c2 is not None else sheet.max_column
-    return sum(1 for c in range(start, end + 1) if _is_populated_cell(sheet.cell(row=row_idx, column=c)))
+    return sum(1 for c in range(start, end + 1) if is_populated_cell(sheet.cell(row=row_idx, column=c)))
 
 
 def _populated_count_in_col(sheet, col_idx, r1=None, r2=None):
     start = r1 if r1 is not None else 1
     end = r2 if r2 is not None else sheet.max_row
-    return sum(1 for r in range(start, end + 1) if _is_populated_cell(sheet.cell(row=r, column=col_idx)))
+    return sum(1 for r in range(start, end + 1) if is_populated_cell(sheet.cell(row=r, column=col_idx)))
 
 
 def _row_density(sheet, row_idx, c1, c2):
@@ -789,7 +807,7 @@ def _row_text_numeric_counts(sheet, row_idx, c1, c2):
     text = numeric = populated = 0
     for c in range(c1, c2 + 1):
         cell = sheet.cell(row=row_idx, column=c)
-        if not _is_populated_cell(cell):
+        if not is_populated_cell(cell):
             continue
         populated += 1
         sem_type = detect_semantic_type(cell)
@@ -812,11 +830,11 @@ def _looks_like_title_or_note_row(sheet, row_idx, c1, c2):
         return False
     # Title/note rows are normally sparse descriptive text spanning less than
     # half the table width, unless style/merge cues make the role explicit.
-    sparse_text = populated <= max(1, width // 2)
+    sparse_text = populated <= max(1, int(width * SPARSE_TEXT_MAX_RATIO))
     styled_or_merged = False
     for c in range(c1, c2 + 1):
         cell = sheet.cell(row=row_idx, column=c)
-        if not _is_populated_cell(cell):
+        if not is_populated_cell(cell):
             continue
         if (
             (cell.font and (cell.font.bold or cell.font.italic))
@@ -836,7 +854,10 @@ def _header_rows_in_range(sheet, r1, c1, r2, c2):
             continue
         if not is_header_row(sheet, r):
             continue
-        if _looks_like_title_or_note_row(sheet, r, c1, c2) and _row_density(sheet, r, c1, c2) < 0.5:
+        if (
+            _looks_like_title_or_note_row(sheet, r, c1, c2)
+            and _row_density(sheet, r, c1, c2) < SPARSE_TEXT_MAX_RATIO
+        ):
             continue
         headers.append(r)
     return headers
@@ -876,7 +897,10 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
     body_rows = []
     note_rows = []
     for r in data_rows:
-        if _looks_like_title_or_note_row(sheet, r, c1, c2) and _row_density(sheet, r, c1, c2) < 0.5:
+        if (
+            _looks_like_title_or_note_row(sheet, r, c1, c2)
+            and _row_density(sheet, r, c1, c2) < SPARSE_TEXT_MAX_RATIO
+        ):
             note_rows.append(r)
         else:
             body_rows.append(r)
@@ -893,7 +917,7 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
             for r in range(last_body + 1, first_note)
         ):
             return None
-        if len(note_rows) > 2:
+        if len(note_rows) > MAX_TRAILING_NOTE_ROWS:
             # More than two trailing notes usually means the rectangle swallowed
             # unrelated prose rather than a compact table footnote.
             return None
@@ -913,7 +937,7 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
         for c in range(c1, c2 + 1)
         if _col_density(sheet, c, header_row, max(body_rows)) == 0
     ]
-    if len(sparse_internal_cols) > max(1, (c2 - c1 + 1) // 2):
+    if len(sparse_internal_cols) / (c2 - c1 + 1) > MAX_SPARSE_COLUMN_RATIO:
         return None
 
     return {
@@ -1007,7 +1031,7 @@ def _header_region_candidates(sheet):
                 end_row = data_row
                 if (
                     _looks_like_title_or_note_row(sheet, data_row, c1, c2)
-                    and _row_density(sheet, data_row, c1, c2) < 0.5
+                    and _row_density(sheet, data_row, c1, c2) < SPARSE_TEXT_MAX_RATIO
                 ):
                     break
             if end_row > row_idx:
@@ -1109,12 +1133,12 @@ def find_boundary_candidates(sheet):
         final_col_anchors.add(c2)
         profile = _candidate_table_profile(sheet, r1, c1, r2, c2)
         if profile is not None:
-            if (r2 - r1 + 1) <= 10:
+            if (r2 - r1 + 1) <= MAX_DETAILED_ANCHOR_DIMENSION:
                 final_row_anchors.update(profile["title_rows"])
                 final_row_anchors.add(profile["header_row"])
                 final_row_anchors.update(profile["body_rows"])
                 final_row_anchors.update(profile["note_rows"])
-            if (c2 - c1 + 1) <= 10:
+            if (c2 - c1 + 1) <= MAX_DETAILED_ANCHOR_DIMENSION:
                 final_col_anchors.update(profile["populated_cols"])
         if r1 > 1 and _populated_count_in_row(sheet, r1 - 1, c1, c2) == 0:
             final_row_anchors.add(r1 - 1)
@@ -1240,16 +1264,19 @@ def _candidate_score(sheet, candidate):
     # Prefer candidates with an early header, dense body, enough body rows and
     # populated cells, while only lightly rewarding contextual title/note rows.
     score = 0
-    score += 30 if header_row == r1 else 24
-    score += min(10, len(profile["body_rows"]) * 2)
-    score += min(8, width)
-    score += body_stats["density"] * 25
-    score += stats["density"] * 8
-    score += stats["year_or_date_ratio"] * 4
-    score += min(12, populated)
-    score += 2 * len(profile["title_rows"])
-    score += len(profile["note_rows"])
-    score -= max(0, height - len(profile["body_rows"]) - len(profile["title_rows"]) - 1) * 2
+    score += HEADER_AT_TOP_BONUS if header_row == r1 else HEADER_AFTER_TITLE_BONUS
+    score += min(MAX_BODY_ROW_BONUS, len(profile["body_rows"]) * BODY_ROW_BONUS)
+    score += min(MAX_WIDTH_BONUS, width)
+    score += body_stats["density"] * BODY_DENSITY_WEIGHT
+    score += stats["density"] * RANGE_DENSITY_WEIGHT
+    score += stats["year_or_date_ratio"] * YEAR_OR_DATE_WEIGHT
+    score += min(MAX_POPULATED_CELL_BONUS, populated)
+    score += TITLE_ROW_BONUS * len(profile["title_rows"])
+    score += NOTE_ROW_BONUS * len(profile["note_rows"])
+    score -= (
+        max(0, height - len(profile["body_rows"]) - len(profile["title_rows"]) - 1)
+        * EXTRA_ROW_PENALTY
+    )
     return score
 
 
@@ -1276,7 +1303,11 @@ def filter_overlapping_candidates(sheet, candidates):
             overlap_other = _overlap_ratio(candidates[idx], candidates[current_idx])
             # Suppress either broad IoU overlaps or near-containment in either
             # direction so sparse wrappers do not coexist with their inner table.
-            if iou < 0.5 and overlap_current < 0.85 and overlap_other < 0.85:
+            if (
+                iou < OVERLAP_IOU_SUPPRESSION_THRESHOLD
+                and overlap_current < OVERLAP_CONTAINMENT_SUPPRESSION_THRESHOLD
+                and overlap_other < OVERLAP_CONTAINMENT_SUPPRESSION_THRESHOLD
+            ):
                 remaining_indices.append(idx)
         indices = remaining_indices
 
