@@ -994,7 +994,10 @@ def _header_region_candidates(sheet):
                     continue
                 blank_run = 0
                 end_row = data_row
-                if _looks_like_title_or_note_row(sheet, data_row, c1, c2) and _row_density(sheet, data_row, c1, c2) < 0.5:
+                if (
+                    _looks_like_title_or_note_row(sheet, data_row, c1, c2)
+                    and _row_density(sheet, data_row, c1, c2) < 0.5
+                ):
                     break
             if end_row > row_idx:
                 candidates.append((start_row, c1, end_row, c2))
@@ -1066,8 +1069,8 @@ def find_boundary_candidates(sheet):
             for i in range(len(rows)):
                 for j in range(i + 1, len(rows)):
                     for k in range(len(cols)):
-                        for l in range(k + 1, len(cols)):
-                            candidates.append((rows[i], cols[k], rows[j], cols[l]))
+                        for end_col_idx in range(k + 1, len(cols)):
+                            candidates.append((rows[i], cols[k], rows[j], cols[end_col_idx]))
     candidates = sorted(set(candidates))
 
     # Step 3: Filter unreasonable candidates
@@ -1084,6 +1087,15 @@ def find_boundary_candidates(sheet):
         final_row_anchors.add(r2)
         final_col_anchors.add(c1)
         final_col_anchors.add(c2)
+        profile = _candidate_table_profile(sheet, r1, c1, r2, c2)
+        if profile is not None:
+            if (r2 - r1 + 1) <= 10:
+                final_row_anchors.update(profile["title_rows"])
+                final_row_anchors.add(profile["header_row"])
+                final_row_anchors.update(profile["body_rows"])
+                final_row_anchors.update(profile["note_rows"])
+            if (c2 - c1 + 1) <= 10:
+                final_col_anchors.update(profile["populated_cols"])
         if r1 > 1 and _populated_count_in_row(sheet, r1 - 1, c1, c2) == 0:
             final_row_anchors.add(r1 - 1)
         if r2 < sheet.max_row and _populated_count_in_row(sheet, r2 + 1, c1, c2) == 0:

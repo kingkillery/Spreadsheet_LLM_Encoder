@@ -16,6 +16,7 @@ from Spreadsheet_LLM_Encoder import (
     filter_overlapping_candidates,
 )
 
+
 class TestSpreadsheetEncoder(unittest.TestCase):
 
     def setUp(self):
@@ -65,8 +66,8 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         rows, cols = find_boundary_candidates(sheet)
         # This is a basic check; the full heuristics are complex.
         # We expect a boundary between the two groups of cells.
-        self.assertIn(4, rows) # Boundary between row 3 and 4
-        self.assertIn(3, cols) # Boundary between col B and C
+        self.assertIn(4, rows)  # Boundary between row 3 and 4
+        self.assertIn(3, cols)  # Boundary between col B and C
 
     def test_plain_text_header_detected_without_style(self):
         wb = openpyxl.Workbook()
@@ -461,6 +462,7 @@ class TestSpreadsheetEncoder(unittest.TestCase):
                 )
         finally:
             os.remove(path)
+
 
 if __name__ == '__main__':
     unittest.main()

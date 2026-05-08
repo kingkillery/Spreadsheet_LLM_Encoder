@@ -1,26 +1,26 @@
 {
   "overall": {
-    "after_anchor_tokens": 38,
-    "after_format_tokens": 11,
-    "after_inverted_index_tokens": 14,
-    "anchor_ratio": 16.289473684210527,
-    "final_tokens": 11,
-    "format_ratio": 56.27272727272727,
-    "inverted_index_ratio": 44.214285714285715,
+    "after_anchor_tokens": 50,
+    "after_format_tokens": 14,
+    "after_inverted_index_tokens": 33,
+    "anchor_ratio": 12.38,
+    "final_tokens": 14,
+    "format_ratio": 44.214285714285715,
+    "inverted_index_ratio": 18.757575757575758,
     "original_tokens": 619,
-    "overall_ratio": 56.27272727272727
+    "overall_ratio": 44.214285714285715
   },
   "sheets": {
     "Sheet1": {
-      "after_anchor_tokens": 38,
-      "after_format_tokens": 11,
-      "after_inverted_index_tokens": 14,
-      "anchor_ratio": 16.289473684210527,
-      "final_tokens": 11,
-      "format_ratio": 56.27272727272727,
-      "inverted_index_ratio": 44.214285714285715,
+      "after_anchor_tokens": 50,
+      "after_format_tokens": 14,
+      "after_inverted_index_tokens": 33,
+      "anchor_ratio": 12.38,
+      "final_tokens": 14,
+      "format_ratio": 44.214285714285715,
+      "inverted_index_ratio": 18.757575757575758,
       "original_tokens": 619,
-      "overall_ratio": 56.27272727272727
+      "overall_ratio": 44.214285714285715
     }
   },
   "tokenizer": {
