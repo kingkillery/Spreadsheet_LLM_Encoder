@@ -669,7 +669,7 @@ def is_header_row(sheet, row_idx):
     if (
         num_populated >= 2
         and num_strings / num_populated >= 0.5
-        and num_numeric / num_populated <= 0.5
+        and num_numeric == 0
         and len(unique_values) > 1
     ):
         return True
@@ -749,6 +749,166 @@ def _edge_density(sheet, r1, c1, r2, c2):
     return populated / len(edge_cells)
 
 
+def _is_populated_cell(cell):
+    return cell.value is not None and str(cell.value).strip() != ""
+
+
+def _populated_count_in_row(sheet, row_idx, c1=None, c2=None):
+    start = c1 if c1 is not None else 1
+    end = c2 if c2 is not None else sheet.max_column
+    return sum(1 for c in range(start, end + 1) if _is_populated_cell(sheet.cell(row=row_idx, column=c)))
+
+
+def _populated_count_in_col(sheet, col_idx, r1=None, r2=None):
+    start = r1 if r1 is not None else 1
+    end = r2 if r2 is not None else sheet.max_row
+    return sum(1 for r in range(start, end + 1) if _is_populated_cell(sheet.cell(row=r, column=col_idx)))
+
+
+def _row_density(sheet, row_idx, c1, c2):
+    width = c2 - c1 + 1
+    return _populated_count_in_row(sheet, row_idx, c1, c2) / width if width else 0
+
+
+def _col_density(sheet, col_idx, r1, r2):
+    height = r2 - r1 + 1
+    return _populated_count_in_col(sheet, col_idx, r1, r2) / height if height else 0
+
+
+def _cell_is_in_merged_range(sheet, cell):
+    return any(cell.coordinate in merged_range for merged_range in sheet.merged_cells.ranges)
+
+
+def _row_text_numeric_counts(sheet, row_idx, c1, c2):
+    text = numeric = populated = 0
+    for c in range(c1, c2 + 1):
+        cell = sheet.cell(row=row_idx, column=c)
+        if not _is_populated_cell(cell):
+            continue
+        populated += 1
+        sem_type = detect_semantic_type(cell)
+        if sem_type in {"numeric", "integer", "float", "percentage", "currency"}:
+            numeric += 1
+        if isinstance(cell.value, str):
+            text += 1
+    return populated, text, numeric
+
+
+def _looks_like_title_or_note_row(sheet, row_idx, c1, c2):
+    """Return True for sparse descriptive rows that should not be table headers."""
+    populated, text, numeric = _row_text_numeric_counts(sheet, row_idx, c1, c2)
+    if populated == 0:
+        return False
+    width = c2 - c1 + 1
+    if numeric > 0:
+        return False
+    if text == 0:
+        return False
+    sparse_text = populated <= max(1, width // 2)
+    styled_or_merged = False
+    for c in range(c1, c2 + 1):
+        cell = sheet.cell(row=row_idx, column=c)
+        if not _is_populated_cell(cell):
+            continue
+        if (
+            (cell.font and (cell.font.bold or cell.font.italic))
+            or (cell.alignment and cell.alignment.horizontal == "center")
+            or _cell_is_in_merged_range(sheet, cell)
+        ):
+            styled_or_merged = True
+            break
+    return sparse_text or styled_or_merged
+
+
+def _header_rows_in_range(sheet, r1, c1, r2, c2):
+    """Find header rows whose populated cells align with a candidate rectangle."""
+    headers = []
+    for r in range(r1, r2 + 1):
+        if _populated_count_in_row(sheet, r, c1, c2) == 0:
+            continue
+        if not is_header_row(sheet, r):
+            continue
+        if _looks_like_title_or_note_row(sheet, r, c1, c2) and _row_density(sheet, r, c1, c2) < 0.5:
+            continue
+        headers.append(r)
+    return headers
+
+
+def _candidate_table_profile(sheet, r1, c1, r2, c2):
+    """Classify candidate rows into title/note, header, and body evidence."""
+    headers = _header_rows_in_range(sheet, r1, c1, r2, c2)
+    if not headers:
+        return None
+
+    header_row = headers[0]
+    prefix_rows = range(r1, header_row)
+    if any(
+        _populated_count_in_row(sheet, r, c1, c2) > 0
+        and not _looks_like_title_or_note_row(sheet, r, c1, c2)
+        for r in prefix_rows
+    ):
+        return None
+
+    data_rows = [
+        r
+        for r in range(header_row + 1, r2 + 1)
+        if _populated_count_in_row(sheet, r, c1, c2) > 0
+    ]
+    if not data_rows:
+        if _populated_count_in_row(sheet, header_row, c1, c2) < 2:
+            return None
+        return {
+            "header_row": header_row,
+            "body_rows": [header_row],
+            "note_rows": [],
+            "title_rows": list(prefix_rows),
+            "populated_cols": _populated_cols_in_row(sheet, header_row),
+        }
+
+    body_rows = []
+    note_rows = []
+    for r in data_rows:
+        if _looks_like_title_or_note_row(sheet, r, c1, c2) and _row_density(sheet, r, c1, c2) < 0.5:
+            note_rows.append(r)
+        else:
+            body_rows.append(r)
+
+    if not body_rows:
+        return None
+    if note_rows:
+        first_note = min(note_rows)
+        if any(r > first_note for r in body_rows):
+            return None
+        if any(_populated_count_in_row(sheet, r, c1, c2) == 0 for r in range(max(body_rows) + 1, first_note)):
+            return None
+        if len(note_rows) > 2:
+            return None
+
+    populated_cols = [
+        c
+        for c in range(c1, c2 + 1)
+        if _populated_count_in_col(sheet, c, header_row, max(body_rows)) > 0
+    ]
+    if len(populated_cols) < 2:
+        return None
+
+    sparse_internal_cols = [
+        c
+        for c in range(c1, c2 + 1)
+        if _col_density(sheet, c, header_row, max(body_rows)) == 0
+    ]
+    if len(sparse_internal_cols) > max(1, (c2 - c1 + 1) // 2):
+        return None
+
+    return {
+        "header_row": header_row,
+        "body_rows": body_rows,
+        "note_rows": note_rows,
+        "title_rows": list(prefix_rows),
+        "populated_cols": populated_cols,
+    }
+
+
 def _populated_cols_in_row(sheet, row_idx):
     cols = []
     for col_idx in range(1, sheet.max_column + 1):
@@ -802,6 +962,45 @@ def _bounded_header_region_candidates(sheet):
     return candidates
 
 
+def _header_region_candidates(sheet):
+    """Compose table rectangles from header/title bands and contiguous columns."""
+    candidates = []
+    for row_idx in range(1, sheet.max_row + 1):
+        if not is_header_row(sheet, row_idx):
+            continue
+        populated_cols = _populated_cols_in_row(sheet, row_idx)
+        if len(populated_cols) < 2:
+            continue
+        for c1, c2 in _contiguous_groups(populated_cols):
+            if c2 <= c1:
+                continue
+
+            start_row = row_idx
+            for title_row in range(row_idx - 1, 0, -1):
+                if _populated_count_in_row(sheet, title_row, c1, c2) == 0:
+                    break
+                if not _looks_like_title_or_note_row(sheet, title_row, c1, c2):
+                    break
+                start_row = title_row
+
+            end_row = row_idx
+            blank_run = 0
+            for data_row in range(row_idx + 1, sheet.max_row + 1):
+                populated = _populated_count_in_row(sheet, data_row, c1, c2)
+                if populated == 0:
+                    blank_run += 1
+                    if blank_run >= 1:
+                        break
+                    continue
+                blank_run = 0
+                end_row = data_row
+                if _looks_like_title_or_note_row(sheet, data_row, c1, c2) and _row_density(sheet, data_row, c1, c2) < 0.5:
+                    break
+            if end_row > row_idx:
+                candidates.append((start_row, c1, end_row, c2))
+    return candidates
+
+
 def find_boundary_candidates(sheet):
     """
     Identify row/column boundary candidates using enhanced heterogeneity heuristics
@@ -833,15 +1032,27 @@ def find_boundary_candidates(sheet):
             # Add both sides of the boundary
             row_candidates.add(r)
             row_candidates.add(r + 1)
+        if _populated_count_in_row(sheet, r) == 0 != _populated_count_in_row(sheet, r + 1):
+            row_candidates.add(r + 1)
+        if _populated_count_in_row(sheet, r) != 0 == _populated_count_in_row(sheet, r + 1):
+            row_candidates.add(r)
 
     col_candidates = set()
     for c in range(1, len(col_profiles)):
         if col_profiles[c] != col_profiles[c - 1]:
             col_candidates.add(c)
             col_candidates.add(c + 1)
+        if _populated_count_in_col(sheet, c) == 0 != _populated_count_in_col(sheet, c + 1):
+            col_candidates.add(c + 1)
+        if _populated_count_in_col(sheet, c) != 0 == _populated_count_in_col(sheet, c + 1):
+            col_candidates.add(c)
+
+    for merged_range in sheet.merged_cells.ranges:
+        row_candidates.update([merged_range.min_row, merged_range.max_row])
+        col_candidates.update([merged_range.min_col, merged_range.max_col])
 
     # Step 2: Compose candidate boundaries
-    candidates = []
+    candidates = _header_region_candidates(sheet)
     if row_candidates and col_candidates:
         rows = sorted(list(row_candidates))
         cols = sorted(list(col_candidates))
@@ -850,13 +1061,14 @@ def find_boundary_candidates(sheet):
             * (len(cols) * (len(cols) - 1) // 2)
         )
         if candidate_count > 2_000:
-            candidates = _bounded_header_region_candidates(sheet)
+            candidates.extend(_bounded_header_region_candidates(sheet))
         else:
             for i in range(len(rows)):
                 for j in range(i + 1, len(rows)):
                     for k in range(len(cols)):
                         for l in range(k + 1, len(cols)):
                             candidates.append((rows[i], cols[k], rows[j], cols[l]))
+    candidates = sorted(set(candidates))
 
     # Step 3: Filter unreasonable candidates
     candidates = filter_unreasonable_candidates(sheet, candidates)
@@ -872,6 +1084,14 @@ def find_boundary_candidates(sheet):
         final_row_anchors.add(r2)
         final_col_anchors.add(c1)
         final_col_anchors.add(c2)
+        if r1 > 1 and _populated_count_in_row(sheet, r1 - 1, c1, c2) == 0:
+            final_row_anchors.add(r1 - 1)
+        if r2 < sheet.max_row and _populated_count_in_row(sheet, r2 + 1, c1, c2) == 0:
+            final_row_anchors.add(r2 + 1)
+        if c1 > 1 and _populated_count_in_col(sheet, c1 - 1, r1, r2) == 0:
+            final_col_anchors.add(c1 - 1)
+        if c2 < sheet.max_column and _populated_count_in_col(sheet, c2 + 1, r1, r2) == 0:
+            final_col_anchors.add(c2 + 1)
 
     return sorted(list(final_row_anchors)), sorted(list(final_col_anchors))
 
@@ -886,22 +1106,45 @@ def filter_unreasonable_candidates(sheet, candidates):
 
         stats = _range_stats(sheet, r1, c1, r2, c2)
 
-        # Internal sparsity filter.
-        if stats["density"] < 0.1:
+        profile = _candidate_table_profile(sheet, r1, c1, r2, c2)
+        if profile is None:
+            continue
+
+        header_row = profile["header_row"]
+        body_end = max(profile["body_rows"])
+        body_stats = _range_stats(sheet, header_row, c1, body_end, c2)
+
+        # Internal sparsity filter. The full candidate may include sparse title
+        # or trailing note rows, so measure table density from header through
+        # body and keep a lower whole-range threshold for contextual rows.
+        if body_stats["density"] < 0.25 or stats["density"] < 0.1:
             continue
 
         # Edge sparsity filter. Real table boundaries generally have visible
         # content near at least one edge; this rejects huge sparse rectangles
         # formed by distant notes or isolated cells.
-        if _edge_density(sheet, r1, c1, r2, c2) < 0.08:
+        if _edge_density(sheet, header_row, c1, body_end, c2) < 0.2:
+            continue
+
+        sparse_body_rows = [
+            r
+            for r in range(header_row, body_end + 1)
+            if _row_density(sheet, r, c1, c2) == 0
+        ]
+        if sparse_body_rows:
+            continue
+
+        sparse_body_cols = [
+            c
+            for c in range(c1, c2 + 1)
+            if _col_density(sheet, c, header_row, body_end) == 0
+        ]
+        if sparse_body_cols:
             continue
 
         # Header and proportion filters. Keep text-header tables, date/year
         # header tables, and numeric-heavy tables only when a header row exists.
-        has_header = any(is_header_row(sheet, r) for r in range(r1, r2 + 1))
-        if not has_header:
-            continue
-        if stats["text_ratio"] == 0 and stats["year_or_date_ratio"] == 0:
+        if body_stats["text_ratio"] == 0 and body_stats["year_or_date_ratio"] == 0:
             continue
 
         filtered.append((r1, c1, r2, c2))
@@ -929,29 +1172,63 @@ def calculate_iou(box1, box2):
     return inter_area / union_area if union_area > 0 else 0
 
 
+def _candidate_area(candidate):
+    r1, c1, r2, c2 = candidate
+    return (r2 - r1 + 1) * (c2 - c1 + 1)
+
+
+def _intersection_area(box1, box2):
+    r1_1, c1_1, r2_1, c2_1 = box1
+    r1_2, c1_2, r2_2, c2_2 = box2
+    inter_r1 = max(r1_1, r1_2)
+    inter_c1 = max(c1_1, c1_2)
+    inter_r2 = min(r2_1, r2_2)
+    inter_c2 = min(c2_1, c2_2)
+    return max(0, inter_r2 - inter_r1 + 1) * max(0, inter_c2 - inter_c1 + 1)
+
+
+def _overlap_ratio(candidate, other):
+    area = _candidate_area(candidate)
+    return _intersection_area(candidate, other) / area if area else 0
+
+
+def _candidate_score(sheet, candidate):
+    r1, c1, r2, c2 = candidate
+    stats = _range_stats(sheet, r1, c1, r2, c2)
+    profile = _candidate_table_profile(sheet, r1, c1, r2, c2)
+    if profile is None:
+        return -1
+
+    header_row = profile["header_row"]
+    body_end = max(profile["body_rows"])
+    body_stats = _range_stats(sheet, header_row, c1, body_end, c2)
+    width = c2 - c1 + 1
+    height = r2 - r1 + 1
+    populated = stats["populated"]
+    score = 0
+    score += 30 if header_row == r1 else 24
+    score += min(10, len(profile["body_rows"]) * 2)
+    score += min(8, width)
+    score += body_stats["density"] * 25
+    score += stats["density"] * 8
+    score += stats["year_or_date_ratio"] * 4
+    score += min(12, populated)
+    score += 2 * len(profile["title_rows"])
+    score += len(profile["note_rows"])
+    score -= max(0, height - len(profile["body_rows"]) - len(profile["title_rows"]) - 1) * 2
+    return score
+
+
 def filter_overlapping_candidates(sheet, candidates):
     """Filter overlapping candidates using heuristics from Appendix C."""
     if not candidates:
         return []
 
-    # Score candidates (higher is better)
-    scores = []
-    for r1, c1, r2, c2 in candidates:
-        score = 0
-        # Header score
-        for r in range(r1, min(r1 + 3, r2 + 1)):  # Check top 3 rows for header
-            if is_header_row(sheet, r):
-                score += 10
-        stats = _range_stats(sheet, r1, c1, r2, c2)
-        score += stats["density"] * 5
-        score += stats["year_or_date_ratio"] * 3
-        # Area score
-        score += (r2 - r1 + 1) * (c2 - c1 + 1)
-        scores.append(score)
+    scores = [_candidate_score(sheet, candidate) for candidate in candidates]
 
     # Non-maximum suppression based on IoU and scores
     indices = list(range(len(candidates)))
-    indices.sort(key=lambda i: scores[i], reverse=True)
+    indices.sort(key=lambda i: (scores[i], _candidate_area(candidates[i])), reverse=True)
 
     keep = []
     while indices:
@@ -961,12 +1238,14 @@ def filter_overlapping_candidates(sheet, candidates):
         remaining_indices = []
         for idx in indices:
             iou = calculate_iou(candidates[current_idx], candidates[idx])
-            # If high overlap, discard the one with the lower score (which is the current `idx` because of sorting)
-            if iou < 0.5:
+            overlap_current = _overlap_ratio(candidates[current_idx], candidates[idx])
+            overlap_other = _overlap_ratio(candidates[idx], candidates[current_idx])
+            if iou < 0.5 and overlap_current < 0.85 and overlap_other < 0.85:
                 remaining_indices.append(idx)
         indices = remaining_indices
 
-    return [candidates[i] for i in keep]
+    kept = [candidates[i] for i in keep]
+    return sorted(kept, key=lambda box: (box[0], box[1], box[2], box[3]))
 
 
 def extract_k_neighborhood(indices, k, max_index):
