@@ -1077,8 +1077,8 @@ def find_boundary_candidates(sheet):
             for i in range(len(rows)):
                 for j in range(i + 1, len(rows)):
                     for k in range(len(cols)):
-                        for m in range(k + 1, len(cols)):
-                            candidates.append((rows[i], cols[k], rows[j], cols[m]))
+                        for col_end_pos in range(k + 1, len(cols)):
+                            candidates.append((rows[i], cols[k], rows[j], cols[col_end_pos]))
     candidates = sorted(set(candidates))
 
     # Step 3: Filter unreasonable candidates
