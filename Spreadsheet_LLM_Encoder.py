@@ -669,7 +669,11 @@ def is_header_row(sheet, row_idx):
     if (
         num_populated >= 2
         and num_strings / num_populated >= 0.5
-        and num_numeric == 0
+        and (
+            num_numeric == 0
+            or num_numeric / num_populated <= 0.1
+            or (num_year_or_date > 0 and num_numeric / num_populated <= 0.5)
+        )
         and len(unique_values) > 1
     ):
         return True
@@ -1031,23 +1035,27 @@ def find_boundary_candidates(sheet):
 
     row_candidates = set()
     for r in range(1, len(row_profiles)):
+        current_populated = _populated_count_in_row(sheet, r)
+        next_populated = _populated_count_in_row(sheet, r + 1)
         if row_profiles[r] != row_profiles[r - 1]:
             # Add both sides of the boundary
             row_candidates.add(r)
             row_candidates.add(r + 1)
-        if _populated_count_in_row(sheet, r) == 0 != _populated_count_in_row(sheet, r + 1):
+        if current_populated == 0 and next_populated != 0:
             row_candidates.add(r + 1)
-        if _populated_count_in_row(sheet, r) != 0 == _populated_count_in_row(sheet, r + 1):
+        if current_populated != 0 and next_populated == 0:
             row_candidates.add(r)
 
     col_candidates = set()
     for c in range(1, len(col_profiles)):
+        current_populated = _populated_count_in_col(sheet, c)
+        next_populated = _populated_count_in_col(sheet, c + 1)
         if col_profiles[c] != col_profiles[c - 1]:
             col_candidates.add(c)
             col_candidates.add(c + 1)
-        if _populated_count_in_col(sheet, c) == 0 != _populated_count_in_col(sheet, c + 1):
+        if current_populated == 0 and next_populated != 0:
             col_candidates.add(c + 1)
-        if _populated_count_in_col(sheet, c) != 0 == _populated_count_in_col(sheet, c + 1):
+        if current_populated != 0 and next_populated == 0:
             col_candidates.add(c)
 
     for merged_range in sheet.merged_cells.ranges:
@@ -1069,8 +1077,8 @@ def find_boundary_candidates(sheet):
             for i in range(len(rows)):
                 for j in range(i + 1, len(rows)):
                     for k in range(len(cols)):
-                        for end_col_idx in range(k + 1, len(cols)):
-                            candidates.append((rows[i], cols[k], rows[j], cols[end_col_idx]))
+                        for m in range(k + 1, len(cols)):
+                            candidates.append((rows[i], cols[k], rows[j], cols[m]))
     candidates = sorted(set(candidates))
 
     # Step 3: Filter unreasonable candidates
