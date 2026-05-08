@@ -1074,11 +1074,16 @@ def find_boundary_candidates(sheet):
         if candidate_count > 2_000:
             candidates.extend(_bounded_header_region_candidates(sheet))
         else:
-            for i in range(len(rows)):
-                for j in range(i + 1, len(rows)):
-                    for k in range(len(cols)):
-                        for col_end_pos in range(k + 1, len(cols)):
-                            candidates.append((rows[i], cols[k], rows[j], cols[col_end_pos]))
+            for row_start_pos in range(len(rows)):
+                for row_end_pos in range(row_start_pos + 1, len(rows)):
+                    for col_start_pos in range(len(cols)):
+                        for col_end_pos in range(col_start_pos + 1, len(cols)):
+                            candidates.append((
+                                rows[row_start_pos],
+                                cols[col_start_pos],
+                                rows[row_end_pos],
+                                cols[col_end_pos],
+                            ))
     candidates = sorted(set(candidates))
 
     # Step 3: Filter unreasonable candidates
