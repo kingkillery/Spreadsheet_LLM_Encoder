@@ -881,9 +881,13 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
         return None
     if note_rows:
         first_note = min(note_rows)
+        last_body = max(body_rows)
         if any(r > first_note for r in body_rows):
             return None
-        if any(_populated_count_in_row(sheet, r, c1, c2) == 0 for r in range(max(body_rows) + 1, first_note)):
+        if first_note > last_body + 1 and any(
+            _populated_count_in_row(sheet, r, c1, c2) == 0
+            for r in range(last_body + 1, first_note)
+        ):
             return None
         if len(note_rows) > 2:
             return None
@@ -988,15 +992,10 @@ def _header_region_candidates(sheet):
                 start_row = title_row
 
             end_row = row_idx
-            blank_run = 0
             for data_row in range(row_idx + 1, sheet.max_row + 1):
                 populated = _populated_count_in_row(sheet, data_row, c1, c2)
                 if populated == 0:
-                    blank_run += 1
-                    if blank_run >= 1:
-                        break
-                    continue
-                blank_run = 0
+                    break
                 end_row = data_row
                 if (
                     _looks_like_title_or_note_row(sheet, data_row, c1, c2)
