@@ -669,6 +669,8 @@ def is_header_row(sheet, row_idx):
     if (
         num_populated >= 2
         and num_strings / num_populated >= 0.5
+        # Plain text headers should not accept ordinary data rows such as
+        # ["West", 100, "Mia"], but should still accept rare numeric/date labels.
         and (
             num_numeric == 0
             or num_numeric / num_populated <= 0.1
@@ -808,6 +810,8 @@ def _looks_like_title_or_note_row(sheet, row_idx, c1, c2):
         return False
     if text == 0:
         return False
+    # Title/note rows are normally sparse descriptive text spanning less than
+    # half the table width, unless style/merge cues make the role explicit.
     sparse_text = populated <= max(1, width // 2)
     styled_or_merged = False
     for c in range(c1, c2 + 1):
@@ -890,6 +894,8 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
         ):
             return None
         if len(note_rows) > 2:
+            # More than two trailing notes usually means the rectangle swallowed
+            # unrelated prose rather than a compact table footnote.
             return None
 
     populated_cols = [
@@ -900,6 +906,8 @@ def _candidate_table_profile(sheet, r1, c1, r2, c2):
     if len(populated_cols) < 2:
         return None
 
+    # Reject wrappers where more than half of the candidate width is blank
+    # between the header and body; those usually bridge separate side-by-side tables.
     sparse_internal_cols = [
         c
         for c in range(c1, c2 + 1)
@@ -1229,6 +1237,8 @@ def _candidate_score(sheet, candidate):
     width = c2 - c1 + 1
     height = r2 - r1 + 1
     populated = stats["populated"]
+    # Prefer candidates with an early header, dense body, enough body rows and
+    # populated cells, while only lightly rewarding contextual title/note rows.
     score = 0
     score += 30 if header_row == r1 else 24
     score += min(10, len(profile["body_rows"]) * 2)
@@ -1264,6 +1274,8 @@ def filter_overlapping_candidates(sheet, candidates):
             iou = calculate_iou(candidates[current_idx], candidates[idx])
             overlap_current = _overlap_ratio(candidates[current_idx], candidates[idx])
             overlap_other = _overlap_ratio(candidates[idx], candidates[current_idx])
+            # Suppress either broad IoU overlaps or near-containment in either
+            # direction so sparse wrappers do not coexist with their inner table.
             if iou < 0.5 and overlap_current < 0.85 and overlap_other < 0.85:
                 remaining_indices.append(idx)
         indices = remaining_indices
