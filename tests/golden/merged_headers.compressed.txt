@@ -1,1 +1,1 @@
-(Quarterly Revenue|A1:C1)(Region|A2)(Q1|B2)(Q2|C2)(West|A3)(IntNum|B3:C4)(East|A4)
+(Quarterly Revenue|A1:D1)(Region|A2)(Q1|B2)(Q2|C2)(Q3|D2)(West|A3)(IntNum|B3:D4)(East|A4)

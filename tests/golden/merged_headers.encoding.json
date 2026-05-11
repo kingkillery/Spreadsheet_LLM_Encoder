@@ -33,10 +33,14 @@
           "C3"
         ],
         "30": [
+          "D3",
           "B4"
         ],
         "40": [
           "C4"
+        ],
+        "50": [
+          "D4"
         ],
         "East": [
           "A4"
@@ -47,8 +51,11 @@
         "Q2": [
           "C2"
         ],
+        "Q3": [
+          "D2"
+        ],
         "Quarterly Revenue": [
-          "A1:C1"
+          "A1:D1"
         ],
         "Region": [
           "A2"
@@ -61,12 +68,14 @@
         "cols": {
           "1": 1,
           "2": 2,
-          "3": 3
+          "3": 3,
+          "4": 4
         },
         "cols_inv": {
           "1": 1,
           "2": 2,
-          "3": 3
+          "3": 3,
+          "4": 4
         },
         "rows": {
           "1": 1,
@@ -84,27 +93,28 @@
       "encoding_mode": "paper_strict",
       "formats": {
         "{\"nfs\": \"General\", \"type\": \"empty\"}": [
-          "B1:C1"
+          "B1:D1"
         ],
         "{\"nfs\": \"General\", \"type\": \"integer\"}": [
-          "B3:C4"
+          "B3:D4"
         ],
         "{\"nfs\": \"General\", \"type\": \"text\"}": [
           "A1",
-          "A2:C2",
+          "A2:D2",
           "A3:A4"
         ]
       },
       "numeric_ranges": {
         "{\"nfs\": \"General\", \"type\": \"integer\"}": [
-          "B3:C4"
+          "B3:D4"
         ]
       },
       "structural_anchors": {
         "columns": [
           "A",
           "B",
-          "C"
+          "C",
+          "D"
         ],
         "rows": [
           1,

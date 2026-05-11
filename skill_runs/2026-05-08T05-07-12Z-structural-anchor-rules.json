@@ -1,0 +1,51 @@
+{
+  "iteration": 7,
+  "timestamp": "2026-05-08T05:07:12Z",
+  "goal": "Implement fuller structural-anchor boundary, sparsity, header/title/note, and overlap-resolution rules.",
+  "verified": [
+    "README problem statement identified structural-anchor detection as simplified Appendix C-style heuristics missing complete boundary, sparsity, header/title/note, and overlap-resolution rules.",
+    "Baseline before changes: python -m pytest passed 185 tests after installing local test dependencies.",
+    "After changes: python -m pytest passed 188 tests.",
+    "After changes: python -m flake8 Spreadsheet_LLM_Encoder.py test_spreadsheet_encoder.py passed.",
+    "Encoder eval smoke completed with python scripts/synthesize_benchmark.py /tmp/spreadsheet_llm_synth_smoke --n 2 --seed 1; python scripts/synthesize_qa.py /tmp/spreadsheet_llm_synth_smoke --per-table 1 --seed 1 --out-suffix \"\"; python run_llm_evaluation.py /tmp/spreadsheet_llm_synth_smoke --backend echo --k 4."
+  ],
+  "inferred": [
+    "Because the paper's original Appendix C fixture set is not bundled, synthetic title/note, sparse-wrapper, merged-header, and wide-sparse golden behavior are used as the local parity proxy.",
+    "Retaining detailed row/column anchors for compact table candidates trades some compression for better boundary fidelity on small and sparse sheets."
+  ],
+  "unknown": [
+    "Exact parity with the paper's proprietary/original Appendix C annotation cases remains unknown without the paper dataset and boundary labels.",
+    "Final validator rerun after the last comment-only/constant-extraction cleanup could not execute because the validation tool reported the remaining validation budget was exhausted."
+  ],
+  "amendment": {
+    "files_changed": [
+      "Spreadsheet_LLM_Encoder.py",
+      "test_spreadsheet_encoder.py",
+      "tests/golden/merged_headers.compressed.txt",
+      "tests/golden/merged_headers.encoding.json",
+      "tests/golden/merged_headers.metrics.json",
+      "tests/golden/wide_sparse_sheet.compressed.txt",
+      "tests/golden/wide_sparse_sheet.encoding.json",
+      "tests/golden/wide_sparse_sheet.metrics.json"
+    ],
+    "tests_added": [
+      "test_spreadsheet_encoder.py::TestSpreadsheetEncoder::test_title_rows_are_allowed_but_far_note_wrappers_are_rejected",
+      "test_spreadsheet_encoder.py::TestSpreadsheetEncoder::test_find_boundary_candidates_handles_title_header_table_and_notes",
+      "test_spreadsheet_encoder.py::TestSpreadsheetEncoder::test_overlap_resolution_prefers_dense_table_over_sparse_wrapper"
+    ],
+    "lines_delta": "+558/-105"
+  },
+  "evaluation": {
+    "tests_total": 188,
+    "tests_passed": 188,
+    "lint": "python -m flake8 Spreadsheet_LLM_Encoder.py test_spreadsheet_encoder.py passed; full-repo flake8 still reports pre-existing issues outside the touched scope.",
+    "eval_smoke": "echo backend smoke completed; expected EchoBackend produced 0.0000 F1 predictions but exercised synth -> encode -> eval wiring.",
+    "validators": {
+      "codeql": "passed: 0 alerts on last completed run",
+      "code_review": "passed on completed runs; review comments were addressed with explicit conditions, descriptive loop names, comments, and named constants; final rerun unavailable due validation budget exhaustion",
+      "security": "no new dependencies, no credential paths, CodeQL passed"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Validate structural-anchor outputs against a larger paper-original or reconstructed Appendix C table-boundary fixture set when labels are available."
+}
