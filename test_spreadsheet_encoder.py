@@ -1,8 +1,10 @@
 import unittest
 import os
 import json
+import sys
 import openpyxl
 from openpyxl.styles import Font, PatternFill
+from unittest.mock import patch
 from Spreadsheet_LLM_Encoder import (
     spreadsheet_llm_encode,
     create_inverted_index,
@@ -11,6 +13,7 @@ from Spreadsheet_LLM_Encoder import (
     find_boundary_candidates,
     aggregate_regions_dfs,
     vanilla_encode,
+    main,
     is_header_row,
     filter_unreasonable_candidates,
     filter_overlapping_candidates,
@@ -297,6 +300,66 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         result = spreadsheet_llm_encode(self.test_file)
         self.assertIsNotNone(result)
         self.assertIn("Sheet1", result["sheets"])
+
+    def test_sheet_filters_include_single_sheet_and_record_skips(self):
+        result = spreadsheet_llm_encode(
+            self.test_file,
+            include_sheets=["Sheet2"],
+        )
+
+        self.assertEqual(list(result["sheets"].keys()), ["Sheet2"])
+        selection = result["sheet_processing"]["selection"]
+        self.assertEqual(selection["included_sheets"], ["Sheet2"])
+        self.assertIn(
+            {"sheet_name": "Sheet1", "reason": "sheet not matched by include filters"},
+            selection["skipped_sheets"],
+        )
+        self.assertEqual(
+            result["sheet_processing"]["sheets"]["Sheet1"]["reason"],
+            "sheet not matched by include filters",
+        )
+
+    def test_sheet_filters_can_exclude_sheet_and_keep_rest(self):
+        result = spreadsheet_llm_encode(
+            self.test_file,
+            exclude_sheets=["Sheet2"],
+        )
+
+        self.assertIn("Sheet1", result["sheets"])
+        self.assertNotIn("Sheet2", result["sheets"])
+        self.assertEqual(
+            result["sheet_processing"]["sheets"]["Sheet2"]["reason"],
+            "sheet excluded by name filter",
+        )
+
+    def test_cli_sheet_filters_write_metadata(self):
+        out_path = "cli_sheet_filter.json"
+        argv = [
+            "Spreadsheet_LLM_Encoder.py",
+            self.test_file,
+            "--output",
+            out_path,
+            "--include-sheet",
+            "Sheet1",
+            "--exclude-sheet",
+            "Sheet2",
+        ]
+
+        try:
+            with patch.object(sys, "argv", argv):
+                main()
+            with open(out_path, encoding="utf-8") as fh:
+                encoded = json.load(fh)
+        finally:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+
+        self.assertIn("Sheet1", encoded["sheets"])
+        self.assertNotIn("Sheet2", encoded["sheets"])
+        self.assertEqual(
+            encoded["sheet_processing"]["sheets"]["Sheet2"]["reason"],
+            "sheet not matched by include filters",
+        )
 
     def test_extract_formula_references_normalizes_local_and_cross_sheet_refs(self):
         refs = extract_formula_references("=SUM(B2:C3)+'Data Sheet'!D4+Aux!E5", "Sheet1")
