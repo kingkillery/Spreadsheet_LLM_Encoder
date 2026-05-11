@@ -2,6 +2,7 @@ import unittest
 import os
 import json
 import sys
+import tempfile
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 from unittest.mock import patch
@@ -332,21 +333,28 @@ class TestSpreadsheetEncoder(unittest.TestCase):
             "sheet excluded by name filter",
         )
 
-    def test_cli_sheet_filters_write_metadata(self):
-        out_path = "cli_sheet_filter.json"
+    def test_cli_include_and_exclude_filters_record_skip_reason(self):
         argv = [
             "Spreadsheet_LLM_Encoder.py",
             self.test_file,
-            "--output",
-            out_path,
             "--include-sheet",
             "Sheet1",
             "--exclude-sheet",
             "Sheet2",
         ]
 
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            out_path = tmp.name
+        argv_with_output = [
+            argv[0],
+            argv[1],
+            "--output",
+            out_path,
+            *argv[2:],
+        ]
+
         try:
-            with patch.object(sys, "argv", argv):
+            with patch.object(sys, "argv", argv_with_output):
                 main()
             with open(out_path, encoding="utf-8") as fh:
                 encoded = json.load(fh)

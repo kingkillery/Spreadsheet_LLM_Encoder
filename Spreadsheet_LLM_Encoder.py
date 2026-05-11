@@ -208,7 +208,7 @@ def _bounded_dimensions(
     return max(1, effective_rows), max(1, effective_cols)
 
 
-def _normalize_sheet_filter_values(values, label):
+def _validate_and_normalize_filter_list(values, parameter_name):
     if values is None:
         return []
     if isinstance(values, str):
@@ -217,18 +217,19 @@ def _normalize_sheet_filter_values(values, label):
     for value in values:
         text = str(value).strip()
         if not text:
-            raise ValueError(f"{label} entries must be non-empty")
+            raise ValueError(f"{parameter_name} entries must be non-empty")
         normalized.append(text)
     return normalized
 
 
-def _compile_sheet_regexes(patterns, label):
+def _compile_sheet_regexes(patterns, parameter_name):
+    """Compile sheet-name regex filters as ``(pattern, compiled_regex)`` tuples."""
     compiled = []
     for pattern in patterns:
         try:
             compiled.append((pattern, re.compile(pattern)))
         except re.error as exc:
-            raise ValueError(f"Invalid {label} pattern '{pattern}': {exc}") from exc
+            raise ValueError(f"Invalid {parameter_name} pattern '{pattern}': {exc}") from exc
     return compiled
 
 
@@ -400,6 +401,17 @@ def spreadsheet_llm_encode(
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
     """
+    if paper_strict:
+        compress_homogeneous = False
+    max_rows_per_sheet = _limit_to_positive_int(max_rows_per_sheet, "max_rows_per_sheet")
+    max_cols_per_sheet = _limit_to_positive_int(max_cols_per_sheet, "max_cols_per_sheet")
+    max_cells_per_sheet = _limit_to_positive_int(max_cells_per_sheet, "max_cells_per_sheet")
+    include_sheets = _validate_and_normalize_filter_list(include_sheets, "include_sheets")
+    exclude_sheets = _validate_and_normalize_filter_list(exclude_sheets, "exclude_sheets")
+    include_sheet_globs = _validate_and_normalize_filter_list(include_sheet_globs, "include_sheet_globs")
+    exclude_sheet_globs = _validate_and_normalize_filter_list(exclude_sheet_globs, "exclude_sheet_globs")
+    include_sheet_regexes = _validate_and_normalize_filter_list(include_sheet_regexes, "include_sheet_regexes")
+    exclude_sheet_regexes = _validate_and_normalize_filter_list(exclude_sheet_regexes, "exclude_sheet_regexes")
     if vanilla:
         return vanilla_encode(
             excel_path,
@@ -411,17 +423,6 @@ def spreadsheet_llm_encode(
             include_sheet_regexes=include_sheet_regexes,
             exclude_sheet_regexes=exclude_sheet_regexes,
         )
-    if paper_strict:
-        compress_homogeneous = False
-    max_rows_per_sheet = _limit_to_positive_int(max_rows_per_sheet, "max_rows_per_sheet")
-    max_cols_per_sheet = _limit_to_positive_int(max_cols_per_sheet, "max_cols_per_sheet")
-    max_cells_per_sheet = _limit_to_positive_int(max_cells_per_sheet, "max_cells_per_sheet")
-    include_sheets = _normalize_sheet_filter_values(include_sheets, "include_sheets")
-    exclude_sheets = _normalize_sheet_filter_values(exclude_sheets, "exclude_sheets")
-    include_sheet_globs = _normalize_sheet_filter_values(include_sheet_globs, "include_sheet_globs")
-    exclude_sheet_globs = _normalize_sheet_filter_values(exclude_sheet_globs, "exclude_sheet_globs")
-    include_sheet_regexes = _normalize_sheet_filter_values(include_sheet_regexes, "include_sheet_regexes")
-    exclude_sheet_regexes = _normalize_sheet_filter_values(exclude_sheet_regexes, "exclude_sheet_regexes")
     include_sheet_regexes_compiled = _compile_sheet_regexes(
         include_sheet_regexes,
         "include_sheet_regexes",
@@ -543,7 +544,13 @@ def spreadsheet_llm_encode(
         sheet_processing["sheets"][sheet_name] = processing_meta
         if processing_meta["status"] == "skipped":
             sheet_processing["selection"]["skipped_sheets"].append(
-                {"sheet_name": sheet_name, "reason": processing_meta.get("reason", "sheet skipped")}
+                {
+                    "sheet_name": sheet_name,
+                    "reason": processing_meta.get(
+                        "reason",
+                        "sheet skipped (reason not recorded)",
+                    ),
+                }
             )
             logger.info(
                 "Skipping sheet '%s' because it exceeds configured limits: %s rows x %s cols",
@@ -2010,12 +2017,12 @@ def vanilla_encode(
     multi-sheet workbooks aren't silently truncated.
     """
     logger.info(f"Producing vanilla encoding for {excel_path}")
-    include_sheets = _normalize_sheet_filter_values(include_sheets, "include_sheets")
-    exclude_sheets = _normalize_sheet_filter_values(exclude_sheets, "exclude_sheets")
-    include_sheet_globs = _normalize_sheet_filter_values(include_sheet_globs, "include_sheet_globs")
-    exclude_sheet_globs = _normalize_sheet_filter_values(exclude_sheet_globs, "exclude_sheet_globs")
-    include_sheet_regexes = _normalize_sheet_filter_values(include_sheet_regexes, "include_sheet_regexes")
-    exclude_sheet_regexes = _normalize_sheet_filter_values(exclude_sheet_regexes, "exclude_sheet_regexes")
+    include_sheets = _validate_and_normalize_filter_list(include_sheets, "include_sheets")
+    exclude_sheets = _validate_and_normalize_filter_list(exclude_sheets, "exclude_sheets")
+    include_sheet_globs = _validate_and_normalize_filter_list(include_sheet_globs, "include_sheet_globs")
+    exclude_sheet_globs = _validate_and_normalize_filter_list(exclude_sheet_globs, "exclude_sheet_globs")
+    include_sheet_regexes = _validate_and_normalize_filter_list(include_sheet_regexes, "include_sheet_regexes")
+    exclude_sheet_regexes = _validate_and_normalize_filter_list(exclude_sheet_regexes, "exclude_sheet_regexes")
     include_sheet_regexes_compiled = _compile_sheet_regexes(
         include_sheet_regexes,
         "include_sheet_regexes",
