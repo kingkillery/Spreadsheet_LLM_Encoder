@@ -62,6 +62,12 @@ Parameters:
 - `--max-cols-per-sheet`: Bounded mode column cap for very large sheets (optional)
 - `--max-cells-per-sheet`: Bounded mode cell cap per sheet after row/column caps are applied (optional)
 - `--sheet-limit-action`: Behavior for sheets over configured caps: `truncate`, `skip`, or `error` (default=`truncate`)
+- `--include-sheet`: Include only this exact sheet name (repeatable)
+- `--exclude-sheet`: Exclude this exact sheet name (repeatable)
+- `--include-sheet-glob`: Include sheets matching this glob pattern (repeatable)
+- `--exclude-sheet-glob`: Exclude sheets matching this glob pattern (repeatable)
+- `--include-sheet-regex`: Include sheets matching this regex pattern (repeatable)
+- `--exclude-sheet-regex`: Exclude sheets matching this regex pattern (repeatable)
 
 The CLI prints compression ratios for each sheet and overall to stdout. These metrics are also stored in the output JSON under `compression_metrics` and emitted via the logger at INFO level.
 
@@ -94,6 +100,13 @@ encoding = spreadsheet_llm_encode(
     output_path="bounded.json",
     max_cells_per_sheet=50000,
     sheet_limit_action="truncate",
+)
+
+# Encode only specific sheets (exact name, glob, and regex filters supported)
+encoding = spreadsheet_llm_encode(
+    excel_path="path/to/workbook.xlsx",
+    include_sheets=["Summary"],
+    exclude_sheet_globs=["Archive*"],
 )
 ```
 
@@ -226,7 +239,7 @@ formula errors, and repeated-formula summaries.
 The `sheet_processing` field records whether the encoder ran in full or
 bounded mode. When row, column, or cell caps are configured, each sheet records
 its original dimensions, encoded dimensions, encoded range, truncation status,
-and skip reason when `--sheet-limit-action skip` is used.
+and skip reason when a sheet is omitted or skipped.
 
 ### Compression Metrics
 

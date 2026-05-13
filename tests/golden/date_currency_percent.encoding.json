@@ -8,6 +8,18 @@
       "sheet_limit_action": "truncate"
     },
     "mode": "full",
+    "selection": {
+      "exclude_sheet_globs": [],
+      "exclude_sheet_regexes": [],
+      "exclude_sheets": [],
+      "include_sheet_globs": [],
+      "include_sheet_regexes": [],
+      "include_sheets": [],
+      "included_sheets": [
+        "Sheet1"
+      ],
+      "skipped_sheets": []
+    },
     "sheets": {
       "Sheet1": {
         "effective_cells": 15,

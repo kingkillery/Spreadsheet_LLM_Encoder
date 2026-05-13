@@ -134,6 +134,11 @@ def main(
                     encoding, query
                 )
                 if sheet_name is None:
+                    if not encoding.get("sheets"):
+                        logger.warning(
+                            "  - SpreadsheetLLM identified a table range but no sheets are encoded."
+                        )
+                        continue
                     sheet_name = next(iter(encoding["sheets"]))
                 sheet_data = encoding["sheets"][sheet_name]
 

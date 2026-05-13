@@ -3,6 +3,7 @@ import openpyxl
 import json
 import logging
 import re
+from fnmatch import fnmatch
 from copy import copy
 from temp_helpers import (
     infer_cell_data_type,
@@ -207,6 +208,63 @@ def _bounded_dimensions(
     return max(1, effective_rows), max(1, effective_cols)
 
 
+def _validate_and_normalize_filter_list(values, parameter_name):
+    if values is None:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    normalized = []
+    for value in values:
+        text = str(value).strip()
+        if not text:
+            raise ValueError(f"{parameter_name} entries must be non-empty")
+        normalized.append(text)
+    return normalized
+
+
+def _compile_sheet_regexes(patterns, parameter_name):
+    """Compile sheet-name regex filters as ``(pattern, compiled_regex)`` tuples."""
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append((pattern, re.compile(pattern)))
+        except re.error as exc:
+            raise ValueError(f"Invalid {parameter_name} pattern '{pattern}': {exc}") from exc
+    return compiled
+
+
+def _sheet_selection_decision(
+    sheet_name,
+    include_names,
+    include_globs,
+    include_regexes,
+    exclude_names,
+    exclude_globs,
+    exclude_regexes,
+):
+    include_filters_active = bool(include_names or include_globs or include_regexes)
+    include_matches = (
+        sheet_name in include_names
+        or any(fnmatch(sheet_name, pattern) for pattern in include_globs)
+        or any(regex.search(sheet_name) for _, regex in include_regexes)
+    )
+    if include_filters_active and not include_matches:
+        return False, "sheet not matched by include filters"
+
+    if sheet_name in exclude_names:
+        return False, "sheet excluded by name filter"
+
+    for pattern in exclude_globs:
+        if fnmatch(sheet_name, pattern):
+            return False, f"sheet excluded by glob filter '{pattern}'"
+
+    for pattern, regex in exclude_regexes:
+        if regex.search(sheet_name):
+            return False, f"sheet excluded by regex filter '{pattern}'"
+
+    return True, None
+
+
 def _copy_bounded_sheet(source_sheet, max_row, max_col):
     """Copy a bounded top-left worksheet region into a normal worksheet."""
     wb = openpyxl.Workbook()
@@ -290,6 +348,12 @@ def spreadsheet_llm_encode(
     max_cols_per_sheet=None,
     max_cells_per_sheet=None,
     sheet_limit_action="truncate",
+    include_sheets=None,
+    exclude_sheets=None,
+    include_sheet_globs=None,
+    exclude_sheet_globs=None,
+    include_sheet_regexes=None,
+    exclude_sheet_regexes=None,
 ):
     """
     Convert an Excel file to SpreadsheetLLM format or a vanilla markdown-like format.
@@ -321,17 +385,52 @@ def spreadsheet_llm_encode(
         sheet_limit_action (str, optional): What to do when a sheet exceeds
             the configured caps: ``"truncate"`` (default), ``"skip"``, or
             ``"error"``.
+        include_sheets (Iterable[str] | str, optional): Exact sheet names to
+            include. When provided, only matching sheets are encoded.
+        exclude_sheets (Iterable[str] | str, optional): Exact sheet names to
+            exclude from encoding.
+        include_sheet_globs (Iterable[str] | str, optional): Glob patterns
+            for sheets to include.
+        exclude_sheet_globs (Iterable[str] | str, optional): Glob patterns
+            for sheets to exclude.
+        include_sheet_regexes (Iterable[str] | str, optional): Regex patterns
+            for sheets to include.
+        exclude_sheet_regexes (Iterable[str] | str, optional): Regex patterns
+            for sheets to exclude.
 
     Returns:
         dict: The SpreadsheetLLM encoding of the Excel file.
     """
-    if vanilla:
-        return vanilla_encode(excel_path, output_path)
     if paper_strict:
         compress_homogeneous = False
     max_rows_per_sheet = _limit_to_positive_int(max_rows_per_sheet, "max_rows_per_sheet")
     max_cols_per_sheet = _limit_to_positive_int(max_cols_per_sheet, "max_cols_per_sheet")
     max_cells_per_sheet = _limit_to_positive_int(max_cells_per_sheet, "max_cells_per_sheet")
+    include_sheets = _validate_and_normalize_filter_list(include_sheets, "include_sheets")
+    exclude_sheets = _validate_and_normalize_filter_list(exclude_sheets, "exclude_sheets")
+    include_sheet_globs = _validate_and_normalize_filter_list(include_sheet_globs, "include_sheet_globs")
+    exclude_sheet_globs = _validate_and_normalize_filter_list(exclude_sheet_globs, "exclude_sheet_globs")
+    include_sheet_regexes = _validate_and_normalize_filter_list(include_sheet_regexes, "include_sheet_regexes")
+    exclude_sheet_regexes = _validate_and_normalize_filter_list(exclude_sheet_regexes, "exclude_sheet_regexes")
+    if vanilla:
+        return vanilla_encode(
+            excel_path,
+            output_path,
+            include_sheets=include_sheets,
+            exclude_sheets=exclude_sheets,
+            include_sheet_globs=include_sheet_globs,
+            exclude_sheet_globs=exclude_sheet_globs,
+            include_sheet_regexes=include_sheet_regexes,
+            exclude_sheet_regexes=exclude_sheet_regexes,
+        )
+    include_sheet_regexes_compiled = _compile_sheet_regexes(
+        include_sheet_regexes,
+        "include_sheet_regexes",
+    )
+    exclude_sheet_regexes_compiled = _compile_sheet_regexes(
+        exclude_sheet_regexes,
+        "exclude_sheet_regexes",
+    )
     if sheet_limit_action not in {"truncate", "skip", "error"}:
         raise ValueError("sheet_limit_action must be 'truncate', 'skip', or 'error'")
     logger.info(f"Processing Excel file: {excel_path}")
@@ -369,6 +468,16 @@ def spreadsheet_llm_encode(
             "max_cells_per_sheet": max_cells_per_sheet,
             "sheet_limit_action": sheet_limit_action,
         },
+        "selection": {
+            "include_sheets": include_sheets,
+            "exclude_sheets": exclude_sheets,
+            "include_sheet_globs": include_sheet_globs,
+            "exclude_sheet_globs": exclude_sheet_globs,
+            "include_sheet_regexes": include_sheet_regexes,
+            "exclude_sheet_regexes": exclude_sheet_regexes,
+            "included_sheets": [],
+            "skipped_sheets": [],
+        },
         "sheets": {},
     }
     overall_orig = overall_anchor = overall_index = overall_format = overall_final = 0
@@ -376,9 +485,53 @@ def spreadsheet_llm_encode(
     for sheet_name in workbook.sheetnames:
         logger.info(f"\\nProcessing sheet: {sheet_name}")
         original_sheet = workbook[sheet_name]
+        include_sheet, selection_reason = _sheet_selection_decision(
+            sheet_name,
+            include_sheets,
+            include_sheet_globs,
+            include_sheet_regexes_compiled,
+            exclude_sheets,
+            exclude_sheet_globs,
+            exclude_sheet_regexes_compiled,
+        )
+        if not include_sheet:
+            sheet_processing["sheets"][sheet_name] = {
+                "status": "skipped",
+                "reason": selection_reason,
+                "limit_action": sheet_limit_action,
+                "truncated": False,
+                "original_rows": original_sheet.max_row or 1,
+                "original_cols": original_sheet.max_column or 1,
+                "original_cells": (original_sheet.max_row or 1) * (original_sheet.max_column or 1),
+                "effective_rows": 0,
+                "effective_cols": 0,
+                "effective_cells": 0,
+                "encoded_range": None,
+            }
+            sheet_processing["selection"]["skipped_sheets"].append(
+                {"sheet_name": sheet_name, "reason": selection_reason}
+            )
+            logger.info("Skipping sheet '%s': %s", sheet_name, selection_reason)
+            continue
 
         if original_sheet.max_row <= 1 and original_sheet.max_column <= 1:
             logger.info(f"Sheet '{sheet_name}' appears to be empty. Skipping.")
+            sheet_processing["sheets"][sheet_name] = {
+                "status": "skipped",
+                "reason": "sheet appears empty",
+                "limit_action": sheet_limit_action,
+                "truncated": False,
+                "original_rows": original_sheet.max_row or 1,
+                "original_cols": original_sheet.max_column or 1,
+                "original_cells": (original_sheet.max_row or 1) * (original_sheet.max_column or 1),
+                "effective_rows": 0,
+                "effective_cols": 0,
+                "effective_cells": 0,
+                "encoded_range": None,
+            }
+            sheet_processing["selection"]["skipped_sheets"].append(
+                {"sheet_name": sheet_name, "reason": "sheet appears empty"}
+            )
             continue
 
         effective_rows, effective_cols, processing_meta = _sheet_processing_plan(
@@ -390,6 +543,15 @@ def spreadsheet_llm_encode(
         )
         sheet_processing["sheets"][sheet_name] = processing_meta
         if processing_meta["status"] == "skipped":
+            sheet_processing["selection"]["skipped_sheets"].append(
+                {
+                    "sheet_name": sheet_name,
+                    "reason": processing_meta.get(
+                        "reason",
+                        "sheet skipped (reason not recorded)",
+                    ),
+                }
+            )
             logger.info(
                 "Skipping sheet '%s' because it exceeds configured limits: %s rows x %s cols",
                 sheet_name,
@@ -567,6 +729,7 @@ def spreadsheet_llm_encode(
         )
 
         sheets_encoding[sheet_name] = sheet_encoding
+        sheet_processing["selection"]["included_sheets"].append(sheet_name)
 
         overall_orig += original_tokens
         overall_anchor += anchor_tokens
@@ -1757,6 +1920,42 @@ def main():
             "truncate, skip, or error (default: truncate)."
         ),
     )
+    parser.add_argument(
+        "--include-sheet",
+        action="append",
+        default=[],
+        help="Include only this exact sheet name. Repeat flag for multiple sheets.",
+    )
+    parser.add_argument(
+        "--exclude-sheet",
+        action="append",
+        default=[],
+        help="Exclude this exact sheet name. Repeat flag for multiple sheets.",
+    )
+    parser.add_argument(
+        "--include-sheet-glob",
+        action="append",
+        default=[],
+        help="Include sheets matching this glob pattern. Repeatable.",
+    )
+    parser.add_argument(
+        "--exclude-sheet-glob",
+        action="append",
+        default=[],
+        help="Exclude sheets matching this glob pattern. Repeatable.",
+    )
+    parser.add_argument(
+        "--include-sheet-regex",
+        action="append",
+        default=[],
+        help="Include sheets whose names match this regex. Repeatable.",
+    )
+    parser.add_argument(
+        "--exclude-sheet-regex",
+        action="append",
+        default=[],
+        help="Exclude sheets whose names match this regex. Repeatable.",
+    )
 
     args = parser.parse_args()
 
@@ -1778,6 +1977,12 @@ def main():
         max_cols_per_sheet=args.max_cols_per_sheet,
         max_cells_per_sheet=args.max_cells_per_sheet,
         sheet_limit_action=args.sheet_limit_action,
+        include_sheets=args.include_sheet,
+        exclude_sheets=args.exclude_sheet,
+        include_sheet_globs=args.include_sheet_glob,
+        exclude_sheet_globs=args.exclude_sheet_glob,
+        include_sheet_regexes=args.include_sheet_regex,
+        exclude_sheet_regexes=args.exclude_sheet_regex,
     )
 
     if result is not None and not args.vanilla:
@@ -1794,7 +1999,16 @@ def main():
             print(f"Overall: {overall.get('overall_ratio', 0.0):.2f}x compression")
 
 
-def vanilla_encode(excel_path, output_path=None):
+def vanilla_encode(
+    excel_path,
+    output_path=None,
+    include_sheets=None,
+    exclude_sheets=None,
+    include_sheet_globs=None,
+    exclude_sheet_globs=None,
+    include_sheet_regexes=None,
+    exclude_sheet_regexes=None,
+):
     """Vanilla markdown-like encoding (paper Section 3.1).
 
     Produces a ``{sheet_name: pair_string}`` dict where each sheet is the
@@ -1803,16 +2017,41 @@ def vanilla_encode(excel_path, output_path=None):
     multi-sheet workbooks aren't silently truncated.
     """
     logger.info(f"Producing vanilla encoding for {excel_path}")
+    include_sheets = _validate_and_normalize_filter_list(include_sheets, "include_sheets")
+    exclude_sheets = _validate_and_normalize_filter_list(exclude_sheets, "exclude_sheets")
+    include_sheet_globs = _validate_and_normalize_filter_list(include_sheet_globs, "include_sheet_globs")
+    exclude_sheet_globs = _validate_and_normalize_filter_list(exclude_sheet_globs, "exclude_sheet_globs")
+    include_sheet_regexes = _validate_and_normalize_filter_list(include_sheet_regexes, "include_sheet_regexes")
+    exclude_sheet_regexes = _validate_and_normalize_filter_list(exclude_sheet_regexes, "exclude_sheet_regexes")
+    include_sheet_regexes_compiled = _compile_sheet_regexes(
+        include_sheet_regexes,
+        "include_sheet_regexes",
+    )
+    exclude_sheet_regexes_compiled = _compile_sheet_regexes(
+        exclude_sheet_regexes,
+        "exclude_sheet_regexes",
+    )
     try:
         workbook = openpyxl.load_workbook(excel_path, data_only=True)
     except Exception as e:
         logger.error(f"Error loading Excel file for vanilla encoding: {e}")
         return None
 
-    vanilla_content = {
-        sheet_name: paper_serializers.to_paper_vanilla_prompt(workbook[sheet_name])
-        for sheet_name in workbook.sheetnames
-    }
+    vanilla_content = {}
+    for sheet_name in workbook.sheetnames:
+        include_sheet, _ = _sheet_selection_decision(
+            sheet_name,
+            include_sheets,
+            include_sheet_globs,
+            include_sheet_regexes_compiled,
+            exclude_sheets,
+            exclude_sheet_globs,
+            exclude_sheet_regexes_compiled,
+        )
+        if include_sheet:
+            vanilla_content[sheet_name] = paper_serializers.to_paper_vanilla_prompt(
+                workbook[sheet_name]
+            )
 
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
