@@ -331,6 +331,14 @@ class TestStage2UncompressedPrompt(unittest.TestCase):
         with self.assertRaises(KeyError):
             ps.to_stage2_uncompressed_prompt(self._path, "NoSuchSheet", "A1:B1")
 
+    def test_stage2_pairs_from_rows_sorts_and_deduplicates_rows(self):
+        result = ps.stage2_pairs_from_rows(self._path, "Data", "A1:B3", [3, 1, 3])
+        self.assertEqual(result, "A1,Name|B1,Score|A3,Bob|B3,87")
+
+    def test_stage2_pairs_from_rows_rejects_out_of_range_rows(self):
+        with self.assertRaises(ValueError):
+            ps.stage2_pairs_from_rows(self._path, "Data", "A1:B2", [3])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -104,15 +104,11 @@
       },
       "encoding_mode": "paper_strict",
       "formats": {
-        "{\"nfs\": \"General\", \"type\": \"empty\"}": [
-          "B1:D1"
-        ],
         "{\"nfs\": \"General\", \"type\": \"integer\"}": [
           "B3:D4"
         ],
         "{\"nfs\": \"General\", \"type\": \"text\"}": [
-          "A1",
-          "A2:D2",
+          "A1:D2",
           "A3:A4"
         ]
       },

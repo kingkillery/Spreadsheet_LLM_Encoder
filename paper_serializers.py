@@ -396,14 +396,23 @@ def stage2_pairs_from_rows(
 
     Used by ``table_split_qa`` to emit ``header_rows + chunk_rows`` per call
     while keeping the column extent of the identified table.
+    ``rows`` must fall inside ``table_range``; output rows are deduplicated and
+    emitted in ascending (row-major) order.
     """
     wb = openpyxl.load_workbook(workbook_path, data_only=True)
     if sheet_name not in wb.sheetnames:
         raise KeyError(f"Sheet '{sheet_name}' not in workbook {workbook_path}")
     sheet = wb[sheet_name]
-    _, c1, _, c2 = parse_range(table_range)
+    r1, c1, r2, c2 = parse_range(table_range)
+    _check_range_size(r1, c1, r2, c2, "stage2_pairs_from_rows")
+    normalized_rows = sorted({int(r) for r in rows})
+    for r in normalized_rows:
+        if r < r1 or r > r2:
+            raise ValueError(
+                f"stage2_pairs_from_rows: row {r} is outside table_range {table_range}"
+            )
     parts: List[str] = []
-    for r in rows:
+    for r in normalized_rows:
         for c in range(c1, c2 + 1):
             ref = format_ref(r, c)
             val = sheet.cell(row=r, column=c).value
