@@ -1,0 +1,47 @@
+{
+  "iteration": 8,
+  "timestamp": "2026-05-25T01:21:28Z",
+  "goal": "Refine paper-aligned merged-cell format handling and Stage 2 row selection semantics.",
+  "verified": [
+    "The implementation already documents paper-faithful compressed tuples where semantic labels or informative number formats substitute compressible regions (paper_serializers.py module docstring and to_paper_compressed_prompt).",
+    "create_inverted_index previously used merged-anchor values but per-cell format keys, which split merged ranges across incompatible semantic/format groups in some merged-header sheets.",
+    "stage2_pairs_from_rows previously accepted unsorted/duplicate/out-of-range rows without validation against table_range.",
+    "Baseline before changes: python -m pytest passed 191 tests.",
+    "After changes: python -m pytest passed 194 tests."
+  ],
+  "inferred": [
+    "Using merged-anchor cell metadata for merged-cell format keys is closer to the paper's region-level semantics than mixing interior merged placeholders with anchor values.",
+    "Deterministic, validated row subsets in Stage 2 chunk rendering reduce prompt drift and keep Algorithm-2 row chunk prompts aligned to the identified table range."
+  ],
+  "unknown": [
+    "Exact tokenization and metric comparability to paper-reported numbers remain environment-dependent without tiktoken and paper-original evaluation assets.",
+    "Whether all external LLM backends always return ranges that preserve strict A1-ordering assumptions is still unknown."
+  ],
+  "amendment": {
+    "files_changed": [
+      "Spreadsheet_LLM_Encoder.py",
+      "paper_serializers.py",
+      "test_spreadsheet_encoder.py",
+      "test_paper_serializers.py",
+      "tests/golden/merged_headers.encoding.json",
+      "skill_runs/2026-05-25T01-21-28Z-paper-fidelity-serializer-index-refinements.json"
+    ],
+    "tests_added": [
+      "test_spreadsheet_encoder.py::TestSpreadsheetEncoder::test_merged_cells_use_anchor_number_format_in_paper_format_map",
+      "test_paper_serializers.py::TestStage2UncompressedPrompt::test_stage2_pairs_from_rows_sorts_and_deduplicates_rows",
+      "test_paper_serializers.py::TestStage2UncompressedPrompt::test_stage2_pairs_from_rows_rejects_out_of_range_rows"
+    ],
+    "lines_delta": "+67/-5"
+  },
+  "evaluation": {
+    "tests_total": 194,
+    "tests_passed": 194,
+    "validators": {
+      "architect": "pending",
+      "security": "pending",
+      "code_review": "pending"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Refine compressed-prompt handling of overlapping or malformed format ranges with explicit conflict-resolution and bounded expansion checks."
+}
