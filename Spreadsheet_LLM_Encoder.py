@@ -1632,10 +1632,12 @@ def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
             # Merged Cell Handling
             merged_value = None
             merged_range = None
+            merged_anchor_cell = None
             for m_range in merged_ranges:
                 if cell_ref in m_range:
                     try:
-                        merged_value = sheet[m_range.start_cell.coordinate].value
+                        merged_anchor_cell = sheet[m_range.start_cell.coordinate]
+                        merged_value = merged_anchor_cell.value
                         merged_range = m_range
                         break
                     except Exception:
@@ -1660,10 +1662,11 @@ def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
 
             # Format Handling
             try:
+                format_cell = merged_anchor_cell if merged_anchor_cell is not None else cell
                 if format_mode == "paper":
-                    format_key = _paper_format_key(cell)
+                    format_key = _paper_format_key(format_cell)
                 else:
-                    format_key = _rich_format_key(cell, merged_range)
+                    format_key = _rich_format_key(format_cell, merged_range)
                 format_map[format_key].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell formats

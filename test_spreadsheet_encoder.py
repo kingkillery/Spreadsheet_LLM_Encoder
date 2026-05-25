@@ -297,6 +297,21 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         self.assertIn(paper_key["type"], {"integer", "numeric"})
         self.assertGreater(len(rich_format_map), 1)
 
+    def test_merged_cells_use_anchor_number_format_in_paper_format_map(self):
+        wb = openpyxl.Workbook()
+        sheet = wb.active
+        sheet.merge_cells("A1:B1")
+        sheet["A1"] = 1234
+        sheet["A1"].number_format = "#,##0"
+
+        _, paper_format_map = create_inverted_index(sheet, [1], [1, 2])
+
+        self.assertEqual(1, len(paper_format_map))
+        paper_key = json.loads(next(iter(paper_format_map.keys())))
+        self.assertEqual("#,##0", paper_key["nfs"])
+        self.assertIn(paper_key["type"], {"integer", "numeric"})
+        self.assertCountEqual(next(iter(paper_format_map.values())), ["A1", "B1"])
+
     def test_spreadsheet_llm_encode_runs(self):
         result = spreadsheet_llm_encode(self.test_file)
         self.assertIsNotNone(result)
