@@ -51,7 +51,7 @@ class TestPackagingMetadata(unittest.TestCase):
             pyproject = tomllib.load(fh)
 
         optional = pyproject["project"]["optional-dependencies"]
-        for group in ("tokenizer", "openai", "finetune", "qlora", "baselines", "all"):
+        for group in ("tokenizer", "openai", "xlsb", "finetune", "qlora", "baselines", "all"):
             with self.subTest(group=group):
                 self.assertIn(group, optional)
                 self.assertGreater(len(optional[group]), 0)

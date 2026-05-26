@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 tokenizer = ["tiktoken>=0.7.0"]
 openai = ["openai>=1.0"]
+xlsb = ["pyxlsb>=1.0.10"]
 finetune = [
     "datasets>=2.14",
     "transformers>=4.40",
@@ -27,6 +28,7 @@ baselines = ["transformers>=4.40"]
 all = [
     "tiktoken>=0.7.0",
     "openai>=1.0",
+    "pyxlsb>=1.0.10",
     "datasets>=2.14",
     "transformers>=4.40",
     "peft>=0.10",

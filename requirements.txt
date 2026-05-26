@@ -2,6 +2,7 @@ streamlit>=1.26.0
 pandas>=1.5.0
 openpyxl>=3.1.0
 tiktoken>=0.7.0  # optional; enables paper-aligned tokenizer-based metrics
+# pyxlsb>=1.0.10  # optional; enables .xlsb workbook reading
 # openai>=1.0  # optional; only required when using OpenAIBackend with CoS
 # datasets>=2.14  # optional; required for prepare_finetuning_data.py --push-to-hub
 # transformers>=4.40  # optional; required for scripts/finetune_local.py

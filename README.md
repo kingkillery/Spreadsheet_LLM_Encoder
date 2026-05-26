@@ -38,6 +38,7 @@ Required dependencies:
 Recommended optional dependencies:
 - `tiktoken` — for paper-aligned compression metrics (char/4 fallback used if unavailable)
 - `openai` — to use `OpenAIBackend` in the Chain-of-Spreadsheet pipeline
+- `pyxlsb` — to encode `.xlsb` workbooks (`pip install pyxlsb`)
 
 ## Usage
 
@@ -52,7 +53,7 @@ spreadsheet-llm-encode path/to/your/spreadsheet.xlsx --output output.json --k 4
 ```
 
 Parameters:
-- `excel_file`: Path to the Excel file you want to encode (required)
+- `excel_file`: Path to the Excel file you want to encode (required; `.xlsx` and `.xlsb` supported)
 - `--output`, `-o`: Path to save the JSON output (optional, defaults to input filename with '_spreadsheetllm.json' suffix)
 - `--k`: Neighborhood distance parameter for structural anchors (optional, default=4, paper's best ablation)
 - `--vanilla`: Produce vanilla pair-string encoding instead of compressed (optional)
@@ -70,6 +71,10 @@ Parameters:
 - `--exclude-sheet-regex`: Exclude sheets matching this regex pattern (repeatable)
 
 The CLI prints compression ratios for each sheet and overall to stdout. These metrics are also stored in the output JSON under `compression_metrics` and emitted via the logger at INFO level.
+
+`.xlsb` notes:
+- If `pyxlsb` is not installed, `.xlsb` inputs fail with an actionable message to install it.
+- The `.xlsb` path currently uses a value-only normalization fallback, so style metadata, merged-cell regions, and formula text/cached-value distinctions may be less faithful than `.xlsx`.
 
 ### Python API
 

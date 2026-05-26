@@ -289,6 +289,47 @@ def _copy_bounded_sheet(source_sheet, max_row, max_col):
     return target
 
 
+def _load_xlsb_workbook(excel_path):
+    """Load ``.xlsb`` into an in-memory openpyxl workbook with cell values only."""
+    try:
+        import pyxlsb
+    except ImportError as exc:
+        raise ImportError(
+            "Reading .xlsb files requires optional dependency 'pyxlsb'. "
+            "Install it with `pip install pyxlsb`."
+        ) from exc
+
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+
+    with pyxlsb.open_workbook(excel_path) as source_workbook:
+        for sheet_name in source_workbook.sheets:
+            target_sheet = workbook.create_sheet(title=sheet_name)
+            with source_workbook.get_sheet(sheet_name) as source_sheet:
+                for row_idx, row in enumerate(source_sheet.rows(), start=1):
+                    for col_idx, cell in enumerate(row, start=1):
+                        value = getattr(cell, "v", None)
+                        if value is not None:
+                            target_sheet.cell(row=row_idx, column=col_idx, value=value)
+    return workbook
+
+
+def _load_workbooks(excel_path, data_only=True):
+    extension = os.path.splitext(str(excel_path))[1].lower()
+    if extension == ".xlsb":
+        workbook = _load_xlsb_workbook(excel_path)
+        logger.warning(
+            "Loaded .xlsb workbook via pyxlsb value-only fallback; style metadata, merged-cell regions, "
+            "and formula text/cached-value distinction may differ from .xlsx loading."
+        )
+        return workbook, workbook, workbook
+
+    workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
+    formula_workbook = openpyxl.load_workbook(excel_path, data_only=False)
+    cached_workbook = workbook if data_only else openpyxl.load_workbook(excel_path, data_only=True)
+    return workbook, formula_workbook, cached_workbook
+
+
 def _sheet_processing_plan(
     sheet,
     *,
@@ -359,7 +400,7 @@ def spreadsheet_llm_encode(
     Convert an Excel file to SpreadsheetLLM format or a vanilla markdown-like format.
 
     Args:
-        excel_path (str): Path to the Excel file.
+        excel_path (str): Path to the Excel file (.xlsx or .xlsb).
         output_path (str, optional): Path to save the output. Defaults to None.
         k (int, optional): Neighborhood distance for structural anchors.
             Defaults to 4 (paper's best ablation setting).
@@ -438,14 +479,15 @@ def spreadsheet_llm_encode(
     try:
         # `data_only=True` returns cached values from formulas (paper-aligned).
         # Number-format strings are still preserved on the cell metadata.
-        workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
-        formula_workbook = openpyxl.load_workbook(excel_path, data_only=False)
-        cached_workbook = workbook if data_only else openpyxl.load_workbook(excel_path, data_only=True)
+        workbook, formula_workbook, cached_workbook = _load_workbooks(excel_path, data_only=data_only)
         logger.info(
             f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
         )
     except FileNotFoundError:
         logger.warning(f"Error: File not found: {excel_path}")
+        return None
+    except ImportError as e:
+        logger.warning(f"Error loading Excel file: {e}")
         return None
     except Exception as e:
         logger.warning(f"Error loading Excel file: {e}")
@@ -2035,7 +2077,10 @@ def vanilla_encode(
         "exclude_sheet_regexes",
     )
     try:
-        workbook = openpyxl.load_workbook(excel_path, data_only=True)
+        workbook, _, _ = _load_workbooks(excel_path, data_only=True)
+    except ImportError as e:
+        logger.error(f"Error loading Excel file for vanilla encoding: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error loading Excel file for vanilla encoding: {e}")
         return None

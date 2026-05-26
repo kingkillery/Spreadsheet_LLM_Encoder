@@ -3,11 +3,13 @@ import os
 import json
 import sys
 import tempfile
+import builtins
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 from unittest.mock import patch
 from Spreadsheet_LLM_Encoder import (
     spreadsheet_llm_encode,
+    _load_xlsb_workbook,
     create_inverted_index,
     extract_formula_graph,
     extract_formula_references,
@@ -63,6 +65,54 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         self.assertIn("Sheet2", result)
         self.assertTrue(result["Sheet1"].startswith("A1,Header 1|B1,Header 2"))
         self.assertTrue(result["Sheet2"].startswith("A1,Hello|B1,World"))
+
+    def test_xlsb_loader_requires_optional_dependency(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "pyxlsb":
+                raise ImportError("No module named 'pyxlsb'")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaisesRegex(
+                ImportError,
+                "Reading \\.xlsb files requires optional dependency 'pyxlsb'.*pip install pyxlsb",
+            ):
+                _load_xlsb_workbook("missing_dependency.xlsb")
+
+    def test_spreadsheet_llm_encode_uses_xlsb_loader(self):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "BinarySheet"
+        ws["A1"] = "Region"
+        ws["B1"] = "Revenue"
+        ws["A2"] = "West"
+        ws["B2"] = 100
+
+        with patch("Spreadsheet_LLM_Encoder._load_xlsb_workbook", return_value=wb) as mock_loader:
+            result = spreadsheet_llm_encode("sample.xlsb")
+
+        self.assertIsNotNone(result)
+        self.assertIn("BinarySheet", result["sheets"])
+        self.assertEqual(result["sheet_processing"]["selection"]["included_sheets"], ["BinarySheet"])
+        self.assertEqual(mock_loader.call_count, 1)
+
+    def test_xlsb_dependency_error_is_actionable_for_encode_and_vanilla(self):
+        error_message = (
+            "Reading .xlsb files requires optional dependency 'pyxlsb'. "
+            "Install it with `pip install pyxlsb`."
+        )
+        with patch("Spreadsheet_LLM_Encoder._load_xlsb_workbook", side_effect=ImportError(error_message)):
+            with self.assertLogs("Spreadsheet_LLM_Encoder", level="WARNING") as encode_logs:
+                encoded = spreadsheet_llm_encode("sample.xlsb")
+            with self.assertLogs("Spreadsheet_LLM_Encoder", level="ERROR") as vanilla_logs:
+                vanilla = vanilla_encode("sample.xlsb")
+
+        self.assertIsNone(encoded)
+        self.assertIsNone(vanilla)
+        self.assertTrue(any("pip install pyxlsb" in line for line in encode_logs.output))
+        self.assertTrue(any("pip install pyxlsb" in line for line in vanilla_logs.output))
 
     def test_find_boundary_candidates_advanced(self):
         wb = openpyxl.load_workbook(self.test_file)
