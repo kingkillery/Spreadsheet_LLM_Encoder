@@ -28,7 +28,7 @@
       "test_paper_serializers.py::TestCompressedPrompt::test_oversized_format_region_is_skipped_with_warning",
       "test_paper_serializers.py::TestCompressedPrompt::test_oversized_cells_range_is_skipped_with_warning"
     ],
-    "lines_delta": "+45/-10"
+    "lines_delta": "+50/-14"
   },
   "evaluation": {
     "tests_total": 196,

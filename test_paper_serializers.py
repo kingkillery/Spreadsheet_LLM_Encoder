@@ -301,10 +301,7 @@ class TestCompressedPrompt(unittest.TestCase):
     def test_oversized_format_region_is_skipped_with_warning(self):
         """Oversized format ranges are skipped rather than hanging the process."""
         int_key = _fmt_key("integer", "0")
-        # Build a range larger than MAX_CELLS_PER_RANGE = 1_000_000
-        # Using a region that exceeds the limit via height * width
-        oversized_rng = f"A1:ZZZ1000"  # 702 cols * 1000 rows = 702_000; try a wider one
-        # Use a genuinely over-limit range: 10001 rows x 101 cols > 1_000_000
+        # 10001 rows × 101 cols > MAX_CELLS_PER_RANGE = 1_000_000
         oversized_rng = "A1:CW10001"
         encoding = {
             "cells": {"Header": ["A1"]},
