@@ -1608,6 +1608,23 @@ def _rich_format_key(cell, merged_range=None):
     return json.dumps(format_info, sort_keys=True)
 
 
+def _cell_value_to_str(value) -> str:
+    """Convert a cell value to a stable string key for the inverted index.
+
+    Numeric values keep their ``f"{value}"`` representation so integer and
+    float cells remain in separate groups. All other types (strings, dates,
+    datetimes, booleans, …) are serialised via :func:`_json_safe_value` so
+    that datetime objects use ISO-8601 format instead of Python's default
+    space-separated str() representation.
+    """
+    if isinstance(value, (int, float)):
+        return f"{value}"
+    result = _json_safe_value(value)
+    if isinstance(result, str):
+        return result
+    return str(result)
+
+
 def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
     """Create an inverted index, handling merged cells.
 
@@ -1646,13 +1663,10 @@ def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
             # Use merged value if available, otherwise cell value
             try:
                 if merged_value is not None:
-                    cell_value = str(merged_value) if merged_value is not None else ""
+                    cell_value = _cell_value_to_str(merged_value)
                     inverted_index[cell_value].append(cell_ref)
                 elif cell.value is not None:
-                    if isinstance(cell.value, (int, float)):
-                        cell_value = f"{cell.value}"
-                    else:
-                        cell_value = str(cell.value)
+                    cell_value = _cell_value_to_str(cell.value)
                     inverted_index[cell_value].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell values

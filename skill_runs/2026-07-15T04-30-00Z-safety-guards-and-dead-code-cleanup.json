@@ -1,0 +1,45 @@
+{
+  "iteration": 9,
+  "timestamp": "2026-07-15T04:30:00Z",
+  "goal": "Add range-size guards to to_paper_compressed_prompt, remove dead code from label_for_format_key, and use ISO-8601 format for datetime values in the inverted index.",
+  "verified": [
+    "to_paper_vanilla_prompt and to_stage2_uncompressed_prompt both call _check_range_size before iterating over cell ranges; to_paper_compressed_prompt did not, exposing two nested loops to pathological LLM- or externally-supplied ranges.",
+    "label_for_format_key: the final `if sem_type in COMPRESSIBLE_TYPES:` guard is always True at that point — sem_type was checked against COMPRESSIBLE_TYPES at the top of the function and we only reach the final block if it passed. The trailing `return None` was therefore unreachable.",
+    "create_inverted_index used str(merged_value) for all non-numeric types, producing `2023-01-15 00:00:00` (space separator) for Python datetime.datetime objects. _json_safe_value already exists in the same module and returns value.isoformat() for objects with an isoformat() method, giving the correct ISO-8601 `T`-separated form.",
+    "Baseline before changes: python -m pytest passed 194 tests.",
+    "After changes: python -m pytest passed 196 tests."
+  ],
+  "inferred": [
+    "Skipping oversized format or cell ranges with a warning (continue) rather than raising is the right default for the compressed-prompt path: the caller wants a best-effort prompt, not a hard failure.",
+    "Using _json_safe_value for the inverted index aligns it with the formula-graph value serialisation in the same file, making datetime key strings consistent across the encoding artifact."
+  ],
+  "unknown": [
+    "Whether any real-world encoding produces format or cell ranges large enough to trigger the new guards in practice. They are defensive.",
+    "Whether downstream evaluation scripts that consume saved .json encodings normalise inverted-index datetime keys; the change from space-separated to T-separated is ISO-correct but could affect string-equality comparisons in external tooling."
+  ],
+  "amendment": {
+    "files_changed": [
+      "paper_serializers.py",
+      "Spreadsheet_LLM_Encoder.py",
+      "test_paper_serializers.py",
+      "skill_runs/2026-07-15T04-30-00Z-safety-guards-and-dead-code-cleanup.json"
+    ],
+    "tests_added": [
+      "test_paper_serializers.py::TestCompressedPrompt::test_oversized_format_region_is_skipped_with_warning",
+      "test_paper_serializers.py::TestCompressedPrompt::test_oversized_cells_range_is_skipped_with_warning"
+    ],
+    "lines_delta": "+50/-14"
+  },
+  "evaluation": {
+    "tests_total": 196,
+    "tests_passed": 196,
+    "lint": "flake8 paper_serializers.py Spreadsheet_LLM_Encoder.py -- no issues",
+    "validators": {
+      "architect": "pending",
+      "security": "pending",
+      "code_review": "pending"
+    }
+  },
+  "verdict": "promote",
+  "next_gap": "Validate structural-anchor and inverted-index outputs end-to-end against a larger paper-original or reconstructed Appendix C fixture set when labels are available."
+}

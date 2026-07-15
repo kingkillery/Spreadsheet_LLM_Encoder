@@ -267,9 +267,7 @@ def label_for_format_key(format_key: str) -> Optional[str]:
     nfs = info.get("nfs")
     if is_informative_number_format(nfs):
         return str(nfs).strip()
-    if sem_type in COMPRESSIBLE_TYPES:
-        return SEMANTIC_LABEL[sem_type]
-    return None
+    return SEMANTIC_LABEL[sem_type]
 
 
 def _row_major_sort_key(token: str) -> Tuple[int, int]:
@@ -315,7 +313,9 @@ def to_paper_compressed_prompt(
         for rng in ranges or []:
             try:
                 r1, c1, r2, c2 = parse_range(rng)
+                _check_range_size(r1, c1, r2, c2, "to_paper_compressed_prompt/formats")
             except ValueError:
+                logger.warning("Skipping oversized or malformed format region %r", rng)
                 continue
             label_regions.append((label, rng))
             for r in range(r1, r2 + 1):
@@ -328,7 +328,9 @@ def to_paper_compressed_prompt(
         for rng in ranges or []:
             try:
                 r1, c1, r2, c2 = parse_range(rng)
+                _check_range_size(r1, c1, r2, c2, "to_paper_compressed_prompt/cells")
             except ValueError:
+                logger.warning("Skipping oversized or malformed cell range %r", rng)
                 continue
             range_cells = [(r, c) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)]
             uncovered = [pt for pt in range_cells if pt not in covered]
