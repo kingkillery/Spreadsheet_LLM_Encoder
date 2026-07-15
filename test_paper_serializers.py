@@ -298,6 +298,39 @@ class TestCompressedPrompt(unittest.TestCase):
         result = ps.to_paper_compressed_prompt({"cells": {}, "formats": {}})
         self.assertEqual(result, "")
 
+    def test_oversized_format_region_is_skipped_with_warning(self):
+        """Oversized format ranges are skipped rather than hanging the process."""
+        int_key = _fmt_key("integer", "0")
+        # Build a range larger than MAX_CELLS_PER_RANGE = 1_000_000
+        # Using a region that exceeds the limit via height * width
+        oversized_rng = f"A1:ZZZ1000"  # 702 cols * 1000 rows = 702_000; try a wider one
+        # Use a genuinely over-limit range: 10001 rows x 101 cols > 1_000_000
+        oversized_rng = "A1:CW10001"
+        encoding = {
+            "cells": {"Header": ["A1"]},
+            "formats": {int_key: [oversized_rng]},
+        }
+        with self.assertLogs("paper_serializers", level="WARNING") as cm:
+            result = ps.to_paper_compressed_prompt(encoding)
+        # The oversized format region is skipped; the literal cell is emitted.
+        self.assertIn("(Header|A1)", result)
+        self.assertFalse(any("CW10001" in line for line in result.split("(")))
+        self.assertTrue(any("oversized" in line.lower() or "Skipping" in line for line in cm.output))
+
+    def test_oversized_cells_range_is_skipped_with_warning(self):
+        """Oversized cell ranges in the cells dict are skipped rather than hanging."""
+        # 10001 rows × 101 cols > 1_000_000
+        oversized_rng = "A1:CW10001"
+        encoding = {
+            "cells": {"42": [oversized_rng], "Header": ["A1"]},
+            "formats": {},
+        }
+        with self.assertLogs("paper_serializers", level="WARNING") as cm:
+            result = ps.to_paper_compressed_prompt(encoding)
+        # The oversized cell range is skipped; other cells are still emitted.
+        self.assertIn("(Header|A1)", result)
+        self.assertTrue(any("oversized" in line.lower() or "Skipping" in line for line in cm.output))
+
 
 class TestStage2UncompressedPrompt(unittest.TestCase):
 

@@ -1646,13 +1646,19 @@ def create_inverted_index(sheet, kept_rows, kept_cols, format_mode="paper"):
             # Use merged value if available, otherwise cell value
             try:
                 if merged_value is not None:
-                    cell_value = str(merged_value) if merged_value is not None else ""
+                    cell_value = _json_safe_value(merged_value)
+                    if cell_value is None:
+                        cell_value = ""
+                    elif not isinstance(cell_value, str):
+                        cell_value = str(cell_value)
                     inverted_index[cell_value].append(cell_ref)
                 elif cell.value is not None:
                     if isinstance(cell.value, (int, float)):
                         cell_value = f"{cell.value}"
                     else:
-                        cell_value = str(cell.value)
+                        cell_value = _json_safe_value(cell.value)
+                        if not isinstance(cell_value, str):
+                            cell_value = str(cell_value)
                     inverted_index[cell_value].append(cell_ref)
             except Exception as e:
                 # Handle error for problematic cell values
