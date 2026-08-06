@@ -24,13 +24,15 @@ finetune = [
 ]
 qlora = ["bitsandbytes>=0.43"]
 baselines = ["transformers>=4.40"]
+xlsb = ["pyxlsb>=1.0.10"]
 all = [
     "tiktoken>=0.7.0",
     "openai>=1.0",
     "datasets>=2.14",
     "transformers>=4.40",
     "peft>=0.10",
-    "accelerate>=0.28"
+    "accelerate>=0.28",
+    "pyxlsb>=1.0.10"
 ]
 
 [project.scripts]

@@ -64,6 +64,66 @@ class TestSpreadsheetEncoder(unittest.TestCase):
         self.assertTrue(result["Sheet1"].startswith("A1,Header 1|B1,Header 2"))
         self.assertTrue(result["Sheet2"].startswith("A1,Hello|B1,World"))
 
+    def test_xlsb_dependency_missing_returns_actionable_message(self):
+        with patch(
+            "Spreadsheet_LLM_Encoder.importlib.import_module",
+            side_effect=ModuleNotFoundError("No module named 'pyxlsb'"),
+        ):
+            with self.assertLogs("Spreadsheet_LLM_Encoder", level="WARNING") as logs:
+                result = spreadsheet_llm_encode("missing_dependency.xlsb")
+
+        self.assertIsNone(result)
+        self.assertTrue(any("pip install pyxlsb" in msg for msg in logs.output))
+
+    def test_xlsb_reader_path_encodes_simple_sheet(self):
+        class _FakeXlsbCell:
+            def __init__(self, r, c, v):
+                self.r = r
+                self.c = c
+                self.v = v
+
+        class _FakeXlsbSheet:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def rows(self):
+                return self._rows
+
+        class _FakeXlsbWorkbook:
+            sheets = ["Sheet1"]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def get_sheet(self, sheet_name):
+                self._sheet_name = sheet_name
+                return _FakeXlsbSheet([
+                    [_FakeXlsbCell(0, 0, "Header"), _FakeXlsbCell(0, 1, "Value")],
+                    [_FakeXlsbCell(1, 0, "A"), _FakeXlsbCell(1, 1, 10)],
+                ])
+
+        class _FakePyxlsb:
+            @staticmethod
+            def open_workbook(path):
+                return _FakeXlsbWorkbook()
+
+        with patch("Spreadsheet_LLM_Encoder.importlib.import_module", return_value=_FakePyxlsb()):
+            result = spreadsheet_llm_encode("simple.xlsb", k=1, paper_strict=True)
+            vanilla = vanilla_encode("simple.xlsb")
+
+        self.assertIsNotNone(result)
+        self.assertIn("Sheet1", result["sheets"])
+        self.assertTrue(vanilla["Sheet1"].startswith("A1,Header|B1,Value|A2,A|B2,10"))
+
     def test_find_boundary_candidates_advanced(self):
         wb = openpyxl.load_workbook(self.test_file)
         sheet = wb["Sheet1"]

@@ -38,6 +38,7 @@ Required dependencies:
 Recommended optional dependencies:
 - `tiktoken` — for paper-aligned compression metrics (char/4 fallback used if unavailable)
 - `openai` — to use `OpenAIBackend` in the Chain-of-Spreadsheet pipeline
+- `pyxlsb` — to read `.xlsb` workbooks (`pip install pyxlsb`)
 
 ## Usage
 
@@ -108,6 +109,12 @@ encoding = spreadsheet_llm_encode(
     include_sheets=["Summary"],
     exclude_sheet_globs=["Archive*"],
 )
+```
+
+For `.xlsb` files, install `pyxlsb` first:
+
+```bash
+pip install pyxlsb
 ```
 
 
@@ -240,6 +247,12 @@ The `sheet_processing` field records whether the encoder ran in full or
 bounded mode. When row, column, or cell caps are configured, each sheet records
 its original dimensions, encoded dimensions, encoded range, truncation status,
 and skip reason when a sheet is omitted or skipped.
+
+For `.xlsb` inputs, the encoder normalizes workbook values through `pyxlsb`
+into an in-memory worksheet representation before compression. This preserves
+cell values and sheet structure but may not preserve all fidelity that `.xlsx`
+paths provide, especially formula text/cached-value pairs, rich styles, merged
+cell metadata, and number-format detail.
 
 ### Compression Metrics
 
