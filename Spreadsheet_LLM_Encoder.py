@@ -2,6 +2,7 @@ import os
 import openpyxl
 import json
 import logging
+import importlib
 import re
 from fnmatch import fnmatch
 from copy import copy
@@ -47,6 +48,61 @@ _FORMULA_REF_RE = re.compile(
     r"(?::\$?(?P<end_col>[A-Z]{1,3})\$?(?P<end_row>\d+))?",
     re.IGNORECASE,
 )
+
+
+def _is_xlsb_path(excel_path: str) -> bool:
+    return os.path.splitext(str(excel_path))[1].lower() == ".xlsb"
+
+
+def _load_xlsb_workbook(excel_path: str):
+    """Load ``.xlsb`` sheets into an in-memory openpyxl workbook.
+
+    Values are preserved, but style fidelity from binary workbooks is limited.
+    """
+    try:
+        pyxlsb = importlib.import_module("pyxlsb")
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Reading .xlsb files requires optional dependency 'pyxlsb'. "
+            "Install it with: pip install pyxlsb"
+        ) from exc
+
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+
+    with pyxlsb.open_workbook(excel_path) as xlsb_workbook:
+        for sheet_name in xlsb_workbook.sheets:
+            sheet = workbook.create_sheet(title=sheet_name)
+            with xlsb_workbook.get_sheet(sheet_name) as xlsb_sheet:
+                for row in xlsb_sheet.rows():
+                    for cell in row:
+                        if cell is None:
+                            continue
+                        row_idx = getattr(cell, "r", None)
+                        col_idx = getattr(cell, "c", None)
+                        value = getattr(cell, "v", None)
+                        if row_idx is None or col_idx is None or value is None:
+                            continue
+                        sheet.cell(row=row_idx + 1, column=col_idx + 1, value=value)
+
+    return workbook
+
+
+def _load_workbook_for_vanilla(excel_path: str):
+    if _is_xlsb_path(excel_path):
+        return _load_xlsb_workbook(excel_path)
+    return openpyxl.load_workbook(excel_path, data_only=True)
+
+
+def _load_workbooks_for_encoding(excel_path: str, data_only: bool):
+    if _is_xlsb_path(excel_path):
+        workbook = _load_xlsb_workbook(excel_path)
+        return workbook, workbook, workbook
+
+    workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
+    formula_workbook = openpyxl.load_workbook(excel_path, data_only=False)
+    cached_workbook = workbook if data_only else openpyxl.load_workbook(excel_path, data_only=True)
+    return workbook, formula_workbook, cached_workbook
 
 
 def calculate_compression_ratio(original_tokens: int, compressed_tokens: int) -> float:
@@ -436,11 +492,10 @@ def spreadsheet_llm_encode(
     logger.info(f"Processing Excel file: {excel_path}")
 
     try:
-        # `data_only=True` returns cached values from formulas (paper-aligned).
-        # Number-format strings are still preserved on the cell metadata.
-        workbook = openpyxl.load_workbook(excel_path, data_only=data_only)
-        formula_workbook = openpyxl.load_workbook(excel_path, data_only=False)
-        cached_workbook = workbook if data_only else openpyxl.load_workbook(excel_path, data_only=True)
+        workbook, formula_workbook, cached_workbook = _load_workbooks_for_encoding(
+            excel_path,
+            data_only=data_only,
+        )
         logger.info(
             f"Found {len(workbook.sheetnames)} sheets: {', '.join(workbook.sheetnames)}"
         )
@@ -2049,7 +2104,7 @@ def vanilla_encode(
         "exclude_sheet_regexes",
     )
     try:
-        workbook = openpyxl.load_workbook(excel_path, data_only=True)
+        workbook = _load_workbook_for_vanilla(excel_path)
     except Exception as e:
         logger.error(f"Error loading Excel file for vanilla encoding: {e}")
         return None
